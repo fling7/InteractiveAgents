@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from .kb import KnowledgeBase
 from .openai_client import OpenAIResponsesClient
+from .projects import ProjectManager
 from .state import SessionStore
 from .server import start_http_server
 
@@ -171,6 +172,11 @@ def run() -> None:
         print("[Setup] Kein interaktives Terminal erkannt, nutze Beispiel-Daten.")
 
     kb = KnowledgeBase(root / cfg.kb_root, chunk_chars=cfg.kb_chunk_chars)
+    project_manager = ProjectManager(
+        root / "projects",
+        template_room_plan=root / "examples" / "room_plan.example.json",
+        template_agents=root / "examples" / "agents.example.json",
+    )
     store = SessionStore(
         max_history_turns=cfg.max_history_turns,
         max_handoffs=cfg.max_handoffs,
@@ -183,6 +189,7 @@ def run() -> None:
             base_url=cfg.openai_base_url,
             timeout_seconds=cfg.timeout_seconds,
         ),
+        project_manager=project_manager,
         default_room_plan_path=default_room_plan_path,
         default_agents_path=default_agents_path,
     )
