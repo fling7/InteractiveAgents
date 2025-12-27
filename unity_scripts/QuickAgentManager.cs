@@ -51,6 +51,21 @@ public class QuickAgentManager : MonoBehaviour
         public string room_plan_path;
         public string agents_path;
         public string session_id;
+        public string project_id;
+    }
+
+    [Serializable]
+    public class ProjectSummary
+    {
+        public string id;
+        public string display_name;
+        public string description;
+    }
+
+    [Serializable]
+    public class ProjectListResponse
+    {
+        public ProjectSummary[] projects;
     }
 
     [Serializable]
@@ -134,6 +149,11 @@ public class QuickAgentManager : MonoBehaviour
     private Vector2 agentScroll;
     private Vector2 chatScroll;
     private Vector2 uiScroll;
+    private bool useProjectSelection = true;
+    private ProjectSummary[] projects = Array.Empty<ProjectSummary>();
+    private int selectedProjectIndex = -1;
+    private string selectedProjectId = "";
+    private bool showProjectDropdown;
     private GUIStyle bubbleStyle;
     private GUIStyle bubblePointerStyle;
     private LineRenderer handoffLine;
@@ -184,12 +204,19 @@ public class QuickAgentManager : MonoBehaviour
 
     private IEnumerator SetupFromServer()
     {
+        if (useProjectSelection && string.IsNullOrWhiteSpace(selectedProjectId))
+        {
+            statusMessage = "Kein Projekt ausgewählt.";
+            yield break;
+        }
+
         statusMessage = "Setup läuft...";
         var url = $"{backendBaseUrl}/setup";
         var payload = new SetupRequestPaths
         {
-            room_plan_path = roomPlanPath,
-            agents_path = agentsPath
+            room_plan_path = useProjectSelection ? null : roomPlanPath,
+            agents_path = useProjectSelection ? null : agentsPath,
+            project_id = useProjectSelection ? selectedProjectId : null
         };
         var json = JsonUtility.ToJson(payload);
 
@@ -217,7 +244,58 @@ public class QuickAgentManager : MonoBehaviour
             {
                 SetActiveAgentId(lastAgents[0].id);
             }
+
+            if (useProjectSelection)
+            {
+                statusMessage = $"Setup OK. Projekt: {selectedProjectId} | Agents: {lastAgents.Length}";
+            }
         }
+    }
+
+    private IEnumerator RefreshProjects()
+    {
+        statusMessage = "Projekte laden...";
+        var url = $"{backendBaseUrl}/projects";
+        using (var req = UnityWebRequest.Get(url))
+        {
+            yield return req.SendWebRequest();
+
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                statusMessage = "Projektliste fehlgeschlagen: " + req.error;
+                yield break;
+            }
+
+            var resp = JsonUtility.FromJson<ProjectListResponse>(req.downloadHandler.text);
+            projects = resp?.projects ?? Array.Empty<ProjectSummary>();
+            UpdateProjectSelection();
+            statusMessage = $"Projekte geladen: {projects.Length}";
+        }
+    }
+
+    private void UpdateProjectSelection()
+    {
+        if (projects.Length == 0)
+        {
+            selectedProjectIndex = -1;
+            selectedProjectId = "";
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(selectedProjectId))
+        {
+            for (var i = 0; i < projects.Length; i++)
+            {
+                if (projects[i].id == selectedProjectId)
+                {
+                    selectedProjectIndex = i;
+                    return;
+                }
+            }
+        }
+
+        selectedProjectIndex = 0;
+        selectedProjectId = projects[0].id;
     }
 
     private void SpawnAgents(AgentPlacement[] agents)
@@ -527,6 +605,60 @@ public class QuickAgentManager : MonoBehaviour
         GUILayout.Label($"Status: {statusMessage}");
         GUILayout.Label($"Session: {sessionId}");
         GUILayout.Label($"Aktiv: {activeAgentId}");
+
+        GUILayout.Space(6);
+        GUILayout.Label("Projekt auswählen:");
+        var sourceIndex = useProjectSelection ? 0 : 1;
+        sourceIndex = GUILayout.Toolbar(sourceIndex, new[] { "Projekt", "Pfade" });
+        useProjectSelection = sourceIndex == 0;
+
+        if (useProjectSelection)
+        {
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("Projektliste laden"))
+            {
+                StartCoroutine(RefreshProjects());
+            }
+            GUILayout.EndHorizontal();
+
+            if (projects.Length == 0)
+            {
+                GUILayout.Label("Keine Projekte geladen.");
+            }
+            else
+            {
+                var currentLabel = selectedProjectIndex >= 0
+                    ? $"{projects[selectedProjectIndex].display_name} ({projects[selectedProjectIndex].id})"
+                    : "Projekt auswählen";
+
+                if (GUILayout.Button(currentLabel))
+                {
+                    showProjectDropdown = !showProjectDropdown;
+                }
+
+                if (showProjectDropdown)
+                {
+                    for (var i = 0; i < projects.Length; i++)
+                    {
+                        var project = projects[i];
+                        var label = $"{project.display_name} ({project.id})";
+                        if (GUILayout.Button(label))
+                        {
+                            selectedProjectIndex = i;
+                            selectedProjectId = project.id;
+                            showProjectDropdown = false;
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            GUILayout.Label("Room-Plan Pfad:");
+            roomPlanPath = GUILayout.TextField(roomPlanPath);
+            GUILayout.Label("Agenten Pfad:");
+            agentsPath = GUILayout.TextField(agentsPath);
+        }
 
         if (GUILayout.Button("Setup erneut vom Server"))
         {
