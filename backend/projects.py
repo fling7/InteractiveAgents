@@ -109,8 +109,8 @@ class ProjectManager:
         }
         self._write_json(self._project_meta_path(slug), meta)
 
-        agents = json.loads(self.template_agents.read_text(encoding="utf-8")) if self.template_agents.exists() else {"agents": []}
-        room_plan = json.loads(self.template_room_plan.read_text(encoding="utf-8")) if self.template_room_plan.exists() else {}
+        agents = {"agents": []}
+        room_plan = {}
         self._write_json(self._agents_path(slug), agents)
         self._write_json(self._room_plan_path(slug), room_plan)
         self._log(f"Projekt erstellt: {slug}")
