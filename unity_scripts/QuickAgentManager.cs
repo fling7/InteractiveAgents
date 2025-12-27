@@ -99,6 +99,7 @@ public class QuickAgentManager : MonoBehaviour
     private const string ChatInputControlName = "chatInputField";
     private Vector2 agentScroll;
     private Vector2 chatScroll;
+    private Vector2 uiScroll;
 
     private void Start()
     {
@@ -359,6 +360,26 @@ public class QuickAgentManager : MonoBehaviour
             {
                 return parsed.say;
             }
+            if (parsed != null)
+            {
+                var parts = new List<string>();
+                if (!string.IsNullOrWhiteSpace(parsed.antwort))
+                {
+                    parts.Add(parsed.antwort.Trim());
+                }
+                if (!string.IsNullOrWhiteSpace(parsed.rueckfrage))
+                {
+                    var followUp = parsed.rueckfrage.Trim();
+                    if (!string.IsNullOrWhiteSpace(followUp))
+                    {
+                        parts.Add($"Rückfrage: {followUp}");
+                    }
+                }
+                if (parts.Count > 0)
+                {
+                    return string.Join("\n\n", parts);
+                }
+            }
         }
         catch
         {
@@ -375,7 +396,12 @@ public class QuickAgentManager : MonoBehaviour
             return;
         }
 
-        GUILayout.BeginArea(uiRect, GUI.skin.box);
+        var maxWidth = Mathf.Min(uiRect.width, Screen.width - uiRect.x - 10f);
+        var maxHeight = Mathf.Min(uiRect.height, Screen.height - uiRect.y - 10f);
+        var clampedRect = new Rect(uiRect.x, uiRect.y, maxWidth, maxHeight);
+
+        GUILayout.BeginArea(clampedRect, GUI.skin.box);
+        uiScroll = GUILayout.BeginScrollView(uiScroll);
         GUILayout.Label("Quick Agent Manager");
         GUILayout.Space(4);
 
@@ -411,7 +437,10 @@ public class QuickAgentManager : MonoBehaviour
         GUI.SetNextControlName(ChatInputControlName);
         chatInput = GUILayout.TextField(chatInput);
         if (Event.current.type == EventType.KeyDown
-            && (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+            && (Event.current.keyCode == KeyCode.Return
+                || Event.current.keyCode == KeyCode.KeypadEnter
+                || Event.current.character == '\n'
+                || Event.current.character == '\r')
             && GUI.GetNameOfFocusedControl() == ChatInputControlName)
         {
             TrySendChatFromInput();
@@ -433,6 +462,7 @@ public class QuickAgentManager : MonoBehaviour
 
         GUILayout.Space(6);
         GUILayout.Label("Interaktion: Linksklick auf Box wählt Agenten.");
+        GUILayout.EndScrollView();
         GUILayout.EndArea();
     }
 
@@ -456,5 +486,7 @@ public class QuickAgentManager : MonoBehaviour
         public string handoff_to;
         public string handoff_reason;
         public float confidence;
+        public string antwort;
+        public string rueckfrage;
     }
 }
