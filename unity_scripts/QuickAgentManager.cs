@@ -28,11 +28,11 @@ public class QuickAgentManager : MonoBehaviour
     [Header("Agent Visuals")]
     public Color activeAgentColor = new Color(1f, 0.85f, 0.2f);
     public float activeAgentEmission = 0.6f;
-    public float bubbleHeight = 1.6f;
-    public float bubbleDuration = 6f;
-    public float bubbleStagger = 0.6f;
-    public float handoffDelay = 1.4f;
-    public float handoffIndicatorDuration = 2.4f;
+    public float bubbleHeight = 0.6f;
+    public float bubbleDuration = 15f;
+    public float bubbleStagger = 5f;
+    public float handoffDelay = 5f;
+    public float handoffIndicatorDuration = 5f;
     public float handoffLineWidth = 0.06f;
 
     [Header("Camera Movement")]

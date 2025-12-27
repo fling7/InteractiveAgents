@@ -1,0 +1,38 @@
+{
+  "agents": [
+    {
+      "id": "agent_1",
+      "display_name": "Neuer Agent",
+      "persona": "Du bist hans peter",
+      "expertise": [
+        "toll sein"
+      ],
+      "knowledge_tags": [
+        "common"
+      ],
+      "preferred_zone_ids": [
+        "daheim"
+      ],
+      "preferred_spawn_tags": [
+        "hinten"
+      ]
+    },
+    {
+      "id": "agent_2",
+      "display_name": "Neuer Agent",
+      "persona": "Du bist Linus",
+      "expertise": [
+        "du bist traurig"
+      ],
+      "knowledge_tags": [
+        "common"
+      ],
+      "preferred_zone_ids": [
+        "daheim"
+      ],
+      "preferred_spawn_tags": [
+        "hinten"
+      ]
+    }
+  ]
+}
