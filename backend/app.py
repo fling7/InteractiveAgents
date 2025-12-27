@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from getpass import getpass
@@ -35,10 +36,39 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _print_setup_instructions(root: Path) -> None:
+    print("\n[Setup] Projekt-Setup")
+    print(f"- Lege deine Konfiguration an: {root / 'config.json'}")
+    print("  (Vorlage: config.example.json im Projektroot)")
+    print("- Wissensbasis: Lege Dateien in kb/<tag>/... ab, z. B. kb/common/intro.txt")
+    print("- Agenten/Room-Plan: Nutze examples/agents.example.json und examples/room_plan.example.json")
+    print("- API-Check: GET /health auf dem Server")
+
+
+def _prompt_openai_key() -> str:
+    env_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if env_key:
+        print("[Setup] OpenAI API Key aus Umgebungsvariable OPENAI_API_KEY geladen.")
+        return env_key
+    print("\n[Setup] OpenAI API Key fehlt in config.json.")
+    print("Du kannst ihn jetzt eingeben oder die Umgebungsvariable OPENAI_API_KEY setzen.")
+    try:
+        key = getpass("OpenAI API Key eingeben (Eingabe bleibt unsichtbar): ").strip()
+        if key:
+            return key
+        print("[Setup] Keine Eingabe erkannt. Fallback auf sichtbare Eingabe.")
+    except (KeyboardInterrupt, EOFError):
+        raise
+    except Exception:
+        print("[Setup] Unsichtbare Eingabe nicht verfügbar. Fallback auf sichtbare Eingabe.")
+    return input("OpenAI API Key eingeben (sichtbar): ").strip()
+
+
 def load_config() -> AppConfig:
     root = _project_root()
     cfg_path = root / "config.json"
     if not cfg_path.exists():
+        _print_setup_instructions(root)
         raise FileNotFoundError(f"config.json nicht gefunden: {cfg_path}")
 
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -63,10 +93,9 @@ def load_config() -> AppConfig:
 
     # If key missing: ask once and write back to config.json
     if not cfg.openai_api_key:
-        print("\n[Setup] OpenAI API Key fehlt in config.json.")
         print("Du kannst ihn jetzt einmalig eingeben (wird in config.json gespeichert).")
         try:
-            key = getpass("OpenAI API Key eingeben (Eingabe bleibt unsichtbar): ").strip()
+            key = _prompt_openai_key()
         except (KeyboardInterrupt, EOFError):
             print("\nAbgebrochen. Bitte trage openai_api_key in config.json ein.")
             sys.exit(1)
@@ -84,8 +113,14 @@ def load_config() -> AppConfig:
 
 
 def run() -> None:
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except FileNotFoundError as exc:
+        print(f"[Setup] {exc}")
+        print("[Setup] Bitte config.json anlegen und erneut starten.\n")
+        sys.exit(1)
     root = _project_root()
+    _print_setup_instructions(root)
 
     kb = KnowledgeBase(root / cfg.kb_root, chunk_chars=cfg.kb_chunk_chars)
     store = SessionStore(
