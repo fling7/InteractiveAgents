@@ -34,14 +34,22 @@ class ProjectManager:
         self.root.mkdir(parents=True, exist_ok=True)
         self.template_room_plan = template_room_plan
         self.template_agents = template_agents
+        self._log("Initialisiert: " + str(self.root))
+
+    def _log(self, message: str) -> None:
+        print(f"[ProjectManager] {message}", flush=True)
 
     def list_projects(self) -> List[Dict[str, Any]]:
         projects: List[Dict[str, Any]] = []
         if not self.root.exists():
             return projects
         for entry in sorted([p for p in self.root.iterdir() if p.is_dir()]):
-            meta = self._load_project_meta(entry.name)
-            projects.append(meta)
+            try:
+                meta = self._load_project_meta(entry.name)
+                projects.append(meta)
+            except Exception as exc:
+                self._log(f"Warnung: Projekt '{entry.name}' konnte nicht geladen werden: {exc}")
+        self._log(f"Projektliste geladen: {len(projects)} Projekte")
         return projects
 
     def _project_dir(self, project_id: str) -> Path:
@@ -79,7 +87,10 @@ class ProjectManager:
                 "created_ms": _now_ms(),
                 "updated_ms": _now_ms(),
             }
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"project.json ungültig: {exc}") from exc
 
     def create_project(self, display_name: str, project_id: Optional[str] = None, description: str = "") -> Dict[str, Any]:
         slug = _slugify(project_id or display_name)
@@ -102,6 +113,7 @@ class ProjectManager:
         room_plan = json.loads(self.template_room_plan.read_text(encoding="utf-8")) if self.template_room_plan.exists() else {}
         self._write_json(self._agents_path(slug), agents)
         self._write_json(self._room_plan_path(slug), room_plan)
+        self._log(f"Projekt erstellt: {slug}")
         return meta
 
     def update_metadata(self, project_id: str, display_name: Optional[str] = None, description: Optional[str] = None) -> Dict[str, Any]:
@@ -113,6 +125,7 @@ class ProjectManager:
             meta["description"] = description
         meta["updated_ms"] = _now_ms()
         self._write_json(self._project_meta_path(project_id), meta)
+        self._log(f"Metadaten gespeichert: {project_id}")
         return meta
 
     def load_agents(self, project_id: str) -> Dict[str, Any]:
@@ -126,6 +139,7 @@ class ProjectManager:
         self._require_project(project_id)
         payload = {"agents": agents}
         self._write_json(self._agents_path(project_id), payload)
+        self._touch_project(project_id, "Agenten gespeichert")
 
     def load_room_plan(self, project_id: str) -> Dict[str, Any]:
         self._require_project(project_id)
@@ -137,6 +151,7 @@ class ProjectManager:
     def save_room_plan(self, project_id: str, room_plan: Dict[str, Any]) -> None:
         self._require_project(project_id)
         self._write_json(self._room_plan_path(project_id), room_plan)
+        self._touch_project(project_id, "Room-Plan gespeichert")
 
     def list_knowledge(self, project_id: str) -> List[Dict[str, Any]]:
         self._require_project(project_id)
@@ -177,6 +192,7 @@ class ProjectManager:
         if fp.exists() and not overwrite:
             raise ValueError("Eintrag existiert bereits.")
         fp.write_text(text or "", encoding="utf-8")
+        self._touch_project(project_id, f"Wissen gespeichert: {safe_tag}/{safe_name}")
         return {"tag": safe_tag, "name": safe_name, "file": str(fp.relative_to(kb_root))}
 
     def delete_knowledge(self, project_id: str, tag: str, name: str) -> None:
@@ -188,8 +204,15 @@ class ProjectManager:
             fp = kb_root / safe_tag / f"{safe_name}{ext}"
             if fp.exists():
                 fp.unlink()
+                self._touch_project(project_id, f"Wissen gelöscht: {safe_tag}/{safe_name}")
                 return
         raise ValueError("Wissenseintrag nicht gefunden.")
+
+    def _touch_project(self, project_id: str, reason: str) -> None:
+        meta = self._load_project_meta(project_id)
+        meta["updated_ms"] = _now_ms()
+        self._write_json(self._project_meta_path(project_id), meta)
+        self._log(f"{reason} ({project_id})")
 
     def _write_json(self, path: Path, payload: Dict[str, Any]) -> None:
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

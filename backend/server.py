@@ -37,6 +37,9 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
             # Slightly quieter default logging
             print("[HTTP]", format % args, flush=True)
 
+        def _log_action(self, message: str) -> None:
+            print(f"[ProjectAPI] {message}", flush=True)
+
         def _log_request(self) -> None:
             print(f"[HTTP] -> {self.command} {self.path}", flush=True)
 
@@ -56,46 +59,56 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
         def do_GET(self) -> None:  # noqa: N802
             self._log_request()
             path = urlparse(self.path).path
-            if path == "/":
-                return self._send_json(
-                    200,
-                    {
-                        "message": "Backend läuft.",
-                        "endpoints": {
-                            "GET /health": "Status-Check",
-                            "POST /setup": "Session/Agenten Setup",
-                            "POST /chat": "Chat mit Agent",
-                            "GET /projects": "Projekte auflisten",
-                            "POST /projects/create": "Projekt erstellen",
-                            "GET /projects/{id}": "Projekt-Details laden",
-                            "POST /projects/{id}/metadata": "Projekt-Metadaten speichern",
-                            "POST /projects/{id}/agents": "Agenten speichern",
-                            "POST /projects/{id}/room-plan": "Room-Plan speichern",
-                            "GET /projects/{id}/knowledge": "Wissensliste",
-                            "POST /projects/{id}/knowledge": "Wissen erstellen/aktualisieren/löschen",
-                            "POST /projects/{id}/knowledge/read": "Wissen laden",
+            try:
+                if path == "/":
+                    return self._send_json(
+                        200,
+                        {
+                            "message": "Backend läuft.",
+                            "endpoints": {
+                                "GET /health": "Status-Check",
+                                "POST /setup": "Session/Agenten Setup",
+                                "POST /chat": "Chat mit Agent",
+                                "GET /projects": "Projekte auflisten",
+                                "POST /projects/create": "Projekt erstellen",
+                                "GET /projects/{id}": "Projekt-Details laden",
+                                "POST /projects/{id}/metadata": "Projekt-Metadaten speichern",
+                                "POST /projects/{id}/agents": "Agenten speichern",
+                                "POST /projects/{id}/room-plan": "Room-Plan speichern",
+                                "GET /projects/{id}/knowledge": "Wissensliste",
+                                "POST /projects/{id}/knowledge": "Wissen erstellen/aktualisieren/löschen",
+                                "POST /projects/{id}/knowledge/read": "Wissen laden",
+                            },
+                            "examples": {
+                                "room_plan_path": "examples/room_plan.example.json",
+                                "agents_path": "examples/agents.example.json",
+                            },
                         },
-                        "examples": {
-                            "room_plan_path": "examples/room_plan.example.json",
-                            "agents_path": "examples/agents.example.json",
-                        },
-                    },
-                )
-            if path == "/health":
-                return self._send_json(200, {"status": "ok"})
-            if path == "/projects":
-                projects = store.project_manager.list_projects()
-                return self._send_json(200, {"projects": projects})
-            parts = [p for p in path.split("/") if p]
-            if len(parts) >= 2 and parts[0] == "projects":
-                project_id = parts[1]
-                if len(parts) == 2:
-                    details = store.project_manager.get_project_details(project_id)
-                    return self._send_json(200, details)
-                if len(parts) == 3 and parts[2] == "knowledge":
-                    knowledge = store.project_manager.list_knowledge(project_id)
-                    return self._send_json(200, {"knowledge": knowledge})
-            return self._send_json(404, {"error": "Not found", "path": path})
+                    )
+                if path == "/health":
+                    return self._send_json(200, {"status": "ok"})
+                if path == "/projects":
+                    self._log_action("Liste Projekte abrufen")
+                    projects = store.project_manager.list_projects()
+                    return self._send_json(200, {"projects": projects})
+                parts = [p for p in path.split("/") if p]
+                if len(parts) >= 2 and parts[0] == "projects":
+                    project_id = parts[1]
+                    if len(parts) == 2:
+                        self._log_action(f"Projekt laden: {project_id}")
+                        details = store.project_manager.get_project_details(project_id)
+                        return self._send_json(200, details)
+                    if len(parts) == 3 and parts[2] == "knowledge":
+                        self._log_action(f"Wissenliste laden: {project_id}")
+                        knowledge = store.project_manager.list_knowledge(project_id)
+                        return self._send_json(200, {"knowledge": knowledge})
+                return self._send_json(404, {"error": "Not found", "path": path})
+            except ValueError as exc:
+                self._log_action(f"Fehler GET {path}: {exc}")
+                return self._send_json(400, {"error": str(exc)})
+            except Exception as exc:
+                self._log_action(f"Fehler GET {path}: {exc}")
+                return self._send_json(500, {"error": "Server error", "details": str(exc)})
 
         def do_POST(self) -> None:  # noqa: N802
             self._log_request()
@@ -118,6 +131,7 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                         raise ValueError("display_name fehlt.")
                     project_id = str(payload.get("project_id") or "").strip() or None
                     description = str(payload.get("description") or "").strip()
+                    self._log_action(f"Projekt erstellen: name='{display_name}', id='{project_id or ''}'")
                     out = store.project_manager.create_project(
                         display_name=display_name,
                         project_id=project_id,
@@ -130,18 +144,21 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                     if len(parts) == 3 and parts[2] == "metadata":
                         display_name = payload.get("display_name")
                         description = payload.get("description")
+                        self._log_action(f"Metadaten speichern: {project_id}")
                         out = store.project_manager.update_metadata(project_id, display_name=display_name, description=description)
                         return self._send_json(200, {"project": out})
                     if len(parts) == 3 and parts[2] == "agents":
                         agents = payload.get("agents") or []
                         if not isinstance(agents, list):
                             raise ValueError("agents muss eine Liste sein.")
+                        self._log_action(f"Agenten speichern: {project_id} ({len(agents)})")
                         store.project_manager.save_agents(project_id, agents)
                         return self._send_json(200, {"status": "ok"})
                     if len(parts) == 3 and parts[2] == "room-plan":
                         room_plan = payload.get("room_plan") or {}
                         if not isinstance(room_plan, dict):
                             raise ValueError("room_plan muss ein Objekt sein.")
+                        self._log_action(f"Room-Plan speichern: {project_id}")
                         store.project_manager.save_room_plan(project_id, room_plan)
                         return self._send_json(200, {"status": "ok"})
                     if len(parts) == 3 and parts[2] == "knowledge":
@@ -149,10 +166,13 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                         tag = str(payload.get("tag") or "").strip()
                         name = str(payload.get("name") or "").strip()
                         if action == "delete":
+                            self._log_action(f"Wissen löschen: {project_id} {tag}/{name}")
                             store.project_manager.delete_knowledge(project_id, tag=tag, name=name)
+                            store.refresh_project_kb(project_id)
                             return self._send_json(200, {"status": "ok"})
                         text = str(payload.get("text") or "")
                         overwrite = bool(payload.get("overwrite", True))
+                        self._log_action(f"Wissen speichern: {project_id} {tag}/{name}")
                         entry = store.project_manager.upsert_knowledge(
                             project_id=project_id,
                             tag=tag,
@@ -160,16 +180,20 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                             text=text,
                             overwrite=overwrite,
                         )
+                        store.refresh_project_kb(project_id)
                         return self._send_json(200, {"entry": entry})
                     if len(parts) == 4 and parts[2] == "knowledge" and parts[3] == "read":
                         tag = str(payload.get("tag") or "").strip()
                         name = str(payload.get("name") or "").strip()
+                        self._log_action(f"Wissen laden: {project_id} {tag}/{name}")
                         entry = store.project_manager.read_knowledge(project_id, tag=tag, name=name)
                         return self._send_json(200, entry)
                 return self._send_json(404, {"error": "Not found", "path": path})
             except ValueError as e:
+                self._log_action(f"Fehler POST {path}: {e}")
                 return self._send_json(400, {"error": str(e)})
             except Exception as e:
+                self._log_action(f"Fehler POST {path}: {e}")
                 return self._send_json(500, {"error": "Server error", "details": str(e)})
 
     httpd = ThreadingHTTPServer((host, port), Handler)

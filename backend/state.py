@@ -217,6 +217,11 @@ class SessionStore:
         self.kb_cache[project_id] = kb
         return kb
 
+    def refresh_project_kb(self, project_id: str) -> KnowledgeBase:
+        if project_id in self.kb_cache:
+            del self.kb_cache[project_id]
+        return self._get_project_kb(project_id)
+
     # -------------------- Chat orchestration --------------------
 
     def _trim_history(self, history: List[Dict[str, str]]) -> List[Dict[str, str]]:
