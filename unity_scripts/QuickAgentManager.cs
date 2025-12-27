@@ -96,6 +96,7 @@ public class QuickAgentManager : MonoBehaviour
     private AgentPlacement[] lastAgents;
     private string statusMessage = "";
     private string chatInput = "";
+    private const string ChatInputControlName = "chatInputField";
     private Vector2 agentScroll;
     private Vector2 chatScroll;
 
@@ -312,10 +313,59 @@ public class QuickAgentManager : MonoBehaviour
                 agentLabel = $"{agentLabel}/{ev.type}";
             }
 
-            var text = ev.text ?? "";
-            text = text.Replace("\\n", "\n");
+            var text = NormalizeChatText(ev.text);
             chatLog.Add($"[{agentLabel}] {text}");
         }
+    }
+
+    private string NormalizeChatText(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return "";
+        }
+
+        var normalized = text.Replace("\\n", "\n").Trim();
+        if (normalized.StartsWith("{") && normalized.EndsWith("}"))
+        {
+            var extracted = TryExtractSayFromJson(normalized);
+            if (!string.IsNullOrWhiteSpace(extracted))
+            {
+                return extracted.Trim();
+            }
+        }
+
+        var jsonStart = normalized.IndexOf('{');
+        var jsonEnd = normalized.LastIndexOf('}');
+        if (jsonStart >= 0 && jsonEnd > jsonStart)
+        {
+            var jsonCandidate = normalized.Substring(jsonStart, jsonEnd - jsonStart + 1);
+            var extracted = TryExtractSayFromJson(jsonCandidate);
+            if (!string.IsNullOrWhiteSpace(extracted))
+            {
+                return extracted.Trim();
+            }
+        }
+
+        return normalized;
+    }
+
+    private string TryExtractSayFromJson(string json)
+    {
+        try
+        {
+            var parsed = JsonUtility.FromJson<StructuredNpcReply>(json);
+            if (parsed != null && !string.IsNullOrWhiteSpace(parsed.say))
+            {
+                return parsed.say;
+            }
+        }
+        catch
+        {
+            // Ignore JSON parse failures and fall back to raw text.
+        }
+
+        return null;
     }
 
     private void OnGUI()
@@ -358,16 +408,18 @@ public class QuickAgentManager : MonoBehaviour
 
         GUILayout.Space(6);
         GUILayout.Label("Chat:");
+        GUI.SetNextControlName(ChatInputControlName);
         chatInput = GUILayout.TextField(chatInput);
+        if (Event.current.type == EventType.KeyDown
+            && (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+            && GUI.GetNameOfFocusedControl() == ChatInputControlName)
+        {
+            TrySendChatFromInput();
+            Event.current.Use();
+        }
         if (GUILayout.Button("Senden"))
         {
-            if (!string.IsNullOrWhiteSpace(chatInput))
-            {
-                var toSend = chatInput;
-                chatLog.Add($"[Du] {toSend}");
-                chatInput = "";
-                StartCoroutine(SendChat(toSend));
-            }
+            TrySendChatFromInput();
         }
         if (GUILayout.Button("Chat leeren"))
         {
@@ -375,14 +427,34 @@ public class QuickAgentManager : MonoBehaviour
         }
 
         chatScroll = GUILayout.BeginScrollView(chatScroll, GUILayout.Height(160));
-        foreach (var line in chatLog)
-        {
-            GUILayout.Label(line);
-        }
+        var chatText = string.Join("\n", chatLog);
+        GUILayout.TextArea(chatText, GUILayout.ExpandHeight(true));
         GUILayout.EndScrollView();
 
         GUILayout.Space(6);
         GUILayout.Label("Interaktion: Linksklick auf Box wählt Agenten.");
         GUILayout.EndArea();
+    }
+
+    private void TrySendChatFromInput()
+    {
+        if (string.IsNullOrWhiteSpace(chatInput))
+        {
+            return;
+        }
+
+        var toSend = chatInput.Trim();
+        chatLog.Add($"[Du] {toSend}");
+        chatInput = "";
+        StartCoroutine(SendChat(toSend));
+    }
+
+    [System.Serializable]
+    private class StructuredNpcReply
+    {
+        public string say;
+        public string handoff_to;
+        public string handoff_reason;
+        public float confidence;
     }
 }
