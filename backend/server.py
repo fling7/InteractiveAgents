@@ -80,8 +80,8 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                                 "POST /projects/{id}/knowledge/read": "Wissen laden",
                             },
                             "examples": {
-                                "room_plan_path": "examples/room_plan.example.json",
-                                "agents_path": "examples/agents.example.json",
+                                "room_plan_path": "examples/room_plan.json",
+                                "agents_path": "examples/agents.json",
                             },
                         },
                     )

@@ -1,0 +1,83 @@
+{
+  "zones": [
+    {
+      "id": "entrance",
+      "name": "Eingang",
+      "tags": [
+        "busy",
+        "welcome"
+      ]
+    },
+    {
+      "id": "demo_area",
+      "name": "Demo Area",
+      "tags": [
+        "demo",
+        "tech"
+      ]
+    },
+    {
+      "id": "pricing_desk",
+      "name": "Preis-/Vertrags-Tisch",
+      "tags": [
+        "pricing",
+        "sales"
+      ]
+    }
+  ],
+  "spawn_points": [
+    {
+      "id": "sp_1",
+      "position": {
+        "x": -2.0,
+        "y": 0.0,
+        "z": 1.5
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      },
+      "zone_id": "entrance",
+      "tags": [
+        "welcome"
+      ]
+    },
+    {
+      "id": "sp_2",
+      "position": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 2.0
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "zone_id": "demo_area",
+      "tags": [
+        "demo",
+        "tech"
+      ]
+    },
+    {
+      "id": "sp_3",
+      "position": {
+        "x": 2.0,
+        "y": 0.0,
+        "z": 1.5
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      },
+      "zone_id": "pricing_desk",
+      "tags": [
+        "pricing",
+        "sales"
+      ]
+    }
+  ]
+}

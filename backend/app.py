@@ -42,7 +42,7 @@ def _print_setup_instructions(root: Path) -> None:
     print("  (Vorlage: config.example.json im Projektroot)")
     print("- Beim Start kannst du wählen, ob du eigene Dateien oder das Beispiel nutzt.")
     print("- Wissensbasis: Lege Dateien in kb/<tag>/... ab, z. B. kb/common/intro.txt")
-    print("- Agenten/Room-Plan: Nutze examples/agents.example.json und examples/room_plan.example.json")
+    print("- Agenten/Room-Plan: Nutze examples/agents.json und examples/room_plan.json")
     print("- API-Check: GET /health auf dem Server")
 
 
@@ -75,8 +75,8 @@ def _select_setup_paths(root: Path) -> tuple[str, str]:
     print("\n[Setup] Datenquelle wählen")
     options = {"1": "Beispiel-Daten", "2": "Eigene Dateien"}
     choice = _prompt_choice("Bitte wählen", options, default="1")
-    default_room = "examples/room_plan.example.json"
-    default_agents = "examples/agents.example.json"
+    default_room = "examples/room_plan.json"
+    default_agents = "examples/agents.json"
     if choice == "1":
         print("[Setup] Beispiel-Daten aktiviert.")
         return default_room, default_agents
@@ -166,15 +166,15 @@ def run() -> None:
     if sys.stdin.isatty():
         default_room_plan_path, default_agents_path = _select_setup_paths(root)
     else:
-        default_room_plan_path = "examples/room_plan.example.json"
-        default_agents_path = "examples/agents.example.json"
+        default_room_plan_path = "examples/room_plan.json"
+        default_agents_path = "examples/agents.json"
         print("[Setup] Kein interaktives Terminal erkannt, nutze Beispiel-Daten.")
 
     kb = KnowledgeBase(root / cfg.kb_root, chunk_chars=cfg.kb_chunk_chars)
     project_manager = ProjectManager(
         root / "projects",
-        template_room_plan=root / "examples" / "room_plan.example.json",
-        template_agents=root / "examples" / "agents.example.json",
+        template_room_plan=root / "examples" / "room_plan.json",
+        template_agents=root / "examples" / "agents.json",
     )
     store = SessionStore(
         max_history_turns=cfg.max_history_turns,

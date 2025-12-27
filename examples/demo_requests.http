@@ -6,8 +6,8 @@ POST http://127.0.0.1:8787/setup
 Content-Type: application/json
 
 {
-  "room_plan_path": "examples/room_plan.example.json",
-  "agents_path": "examples/agents.example.json"
+  "room_plan_path": "examples/room_plan.json",
+  "agents_path": "examples/agents.json"
 }
 
 ### Chat

@@ -78,8 +78,8 @@ Du kannst entweder direkt JSON senden oder per Pfad die Beispiel-Dateien laden:
 Beispiel (wie im PyCharm HTTP Client `examples/demo_requests.http`):
 ```json
 {
-  "room_plan_path": "examples/room_plan.example.json",
-  "agents_path": "examples/agents.example.json"
+  "room_plan_path": "examples/room_plan.json",
+  "agents_path": "examples/agents.json"
 }
 ```
 
