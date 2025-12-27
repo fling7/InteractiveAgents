@@ -5,15 +5,13 @@ using System.Text;
 using UnityEngine;
 using UnityEngine.Networking;
 
-public class ProjectManagerUI : MonoBehaviour
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
+#if UNITY_EDITOR
+public class ProjectManagerUI : EditorWindow
 {
-    [Header("Backend")]
-    public string backendBaseUrl = "http://127.0.0.1:8787";
-
-    [Header("UI")]
-    public bool showUi = true;
-    public Rect uiRect = new Rect(10, 10, 520, 720);
-
     [Serializable]
     public class ProjectSummary
     {
@@ -127,9 +125,31 @@ public class ProjectManagerUI : MonoBehaviour
         public string preferredSpawnTagsCsv;
     }
 
+    private class EditorCoroutine
+    {
+        private readonly IEnumerator routine;
+
+        public EditorCoroutine(IEnumerator routine)
+        {
+            this.routine = routine;
+        }
+
+        public bool MoveNext()
+        {
+            return routine.MoveNext();
+        }
+    }
+
+    private const string DefaultBackendUrl = "http://127.0.0.1:8787";
+
+    private static readonly List<EditorCoroutine> ActiveCoroutines = new List<EditorCoroutine>();
+
+    [SerializeField]
+    private string backendBaseUrl = DefaultBackendUrl;
+
     private ProjectSummary[] projects = Array.Empty<ProjectSummary>();
     private ProjectMetadata currentProject;
-    private List<AgentUi> agentUiList = new List<AgentUi>();
+    private readonly List<AgentUi> agentUiList = new List<AgentUi>();
     private KnowledgeEntrySummary[] knowledgeEntries = Array.Empty<KnowledgeEntrySummary>();
     private Vector2 scroll;
     private string statusMessage = "";
@@ -142,76 +162,82 @@ public class ProjectManagerUI : MonoBehaviour
     private string knowledgeName = "";
     private string knowledgeText = "";
 
-    private void Start()
+    [MenuItem("Tools/Project Manager")]
+    public static void OpenWindow()
     {
-        StartCoroutine(RefreshProjects());
+        var window = GetWindow<ProjectManagerUI>("Project Manager");
+        window.minSize = new Vector2(540, 720);
+        window.Show();
+    }
+
+    private void OnEnable()
+    {
+        StartEditorCoroutine(RefreshProjects());
     }
 
     private void OnGUI()
     {
-        if (!showUi)
-        {
-            return;
-        }
+        EditorGUILayout.Space(4f);
+        EditorGUILayout.LabelField("Projekt-Manager", EditorStyles.boldLabel);
 
-        GUILayout.BeginArea(uiRect, GUI.skin.window);
-        scroll = GUILayout.BeginScrollView(scroll);
-
-        GUILayout.Label("Projekt-Manager");
+        EditorGUILayout.Space(4f);
+        backendBaseUrl = EditorGUILayout.TextField("Backend Base Url", backendBaseUrl);
         if (!string.IsNullOrEmpty(statusMessage))
         {
-            GUILayout.Label("Status: " + statusMessage);
+            EditorGUILayout.HelpBox(statusMessage, MessageType.Info);
         }
 
-        GUILayout.Space(8f);
+        EditorGUILayout.Space(6f);
         if (GUILayout.Button("Projekte aktualisieren"))
         {
-            StartCoroutine(RefreshProjects());
+            StartEditorCoroutine(RefreshProjects());
         }
 
-        GUILayout.Space(8f);
-        GUILayout.Label("Neues Projekt");
+        scroll = EditorGUILayout.BeginScrollView(scroll);
+
+        EditorGUILayout.Space(8f);
+        EditorGUILayout.LabelField("Neues Projekt", EditorStyles.boldLabel);
         newProjectName = LabeledTextField("Name", newProjectName);
         newProjectId = LabeledTextField("ID (optional)", newProjectId);
         newProjectDescription = LabeledTextField("Beschreibung", newProjectDescription);
         if (GUILayout.Button("Projekt erstellen"))
         {
-            StartCoroutine(CreateProject());
+            StartEditorCoroutine(CreateProject());
         }
 
-        GUILayout.Space(10f);
-        GUILayout.Label("Vorhandene Projekte");
+        EditorGUILayout.Space(10f);
+        EditorGUILayout.LabelField("Vorhandene Projekte", EditorStyles.boldLabel);
         if (projects.Length == 0)
         {
-            GUILayout.Label("Keine Projekte gefunden.");
+            EditorGUILayout.LabelField("Keine Projekte gefunden.");
         }
         else
         {
             foreach (var project in projects)
             {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label($"{project.display_name} ({project.id})", GUILayout.Width(320));
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField($"{project.display_name} ({project.id})", GUILayout.Width(320));
                 if (GUILayout.Button("Laden"))
                 {
-                    StartCoroutine(LoadProject(project.id));
+                    StartEditorCoroutine(LoadProject(project.id));
                 }
-                GUILayout.EndHorizontal();
+                EditorGUILayout.EndHorizontal();
             }
         }
 
-        GUILayout.Space(12f);
+        EditorGUILayout.Space(12f);
         if (currentProject != null)
         {
-            GUILayout.Label("Aktuelles Projekt: " + currentProject.display_name);
+            EditorGUILayout.LabelField("Aktuelles Projekt: " + currentProject.display_name, EditorStyles.boldLabel);
             currentProject.display_name = LabeledTextField("Projektname", currentProject.display_name);
             currentProject.description = LabeledTextField("Beschreibung", currentProject.description);
             if (GUILayout.Button("Metadaten speichern"))
             {
-                StartCoroutine(SaveMetadata());
+                StartEditorCoroutine(SaveMetadata());
             }
 
-            GUILayout.Space(8f);
-            GUILayout.Label("Agenten");
+            EditorGUILayout.Space(8f);
+            EditorGUILayout.LabelField("Agenten", EditorStyles.boldLabel);
             if (GUILayout.Button("Agent hinzufügen"))
             {
                 agentUiList.Add(new AgentUi
@@ -229,45 +255,45 @@ public class ProjectManagerUI : MonoBehaviour
             for (var i = 0; i < agentUiList.Count; i++)
             {
                 var agent = agentUiList[i];
-                GUILayout.BeginVertical("box");
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("Agent " + (i + 1));
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Agent " + (i + 1));
                 if (GUILayout.Button("Entfernen", GUILayout.Width(90)))
                 {
                     agentUiList.RemoveAt(i);
-                    GUILayout.EndHorizontal();
-                    GUILayout.EndVertical();
+                    EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.EndVertical();
                     break;
                 }
-                GUILayout.EndHorizontal();
+                EditorGUILayout.EndHorizontal();
 
                 agent.id = LabeledTextField("ID", agent.id);
                 agent.displayName = LabeledTextField("Name", agent.displayName);
-                GUILayout.Label("Persona");
-                agent.persona = GUILayout.TextArea(agent.persona ?? "", GUILayout.MinHeight(60));
+                EditorGUILayout.LabelField("Persona");
+                agent.persona = EditorGUILayout.TextArea(agent.persona ?? "", GUILayout.MinHeight(60));
                 agent.expertiseCsv = LabeledTextField("Expertise (CSV)", agent.expertiseCsv);
                 agent.knowledgeTagsCsv = LabeledTextField("Wissen-Tags (CSV)", agent.knowledgeTagsCsv);
                 agent.preferredZoneIdsCsv = LabeledTextField("Bevorzugte Zonen (CSV)", agent.preferredZoneIdsCsv);
                 agent.preferredSpawnTagsCsv = LabeledTextField("Bevorzugte Spawn-Tags (CSV)", agent.preferredSpawnTagsCsv);
-                GUILayout.EndVertical();
+                EditorGUILayout.EndVertical();
             }
 
             if (GUILayout.Button("Agenten speichern"))
             {
-                StartCoroutine(SaveAgents());
+                StartEditorCoroutine(SaveAgents());
             }
 
-            GUILayout.Space(12f);
-            GUILayout.Label("Wissensdatenbank");
-            GUILayout.BeginVertical("box");
+            EditorGUILayout.Space(12f);
+            EditorGUILayout.LabelField("Wissensdatenbank", EditorStyles.boldLabel);
+            EditorGUILayout.BeginVertical("box");
             knowledgeTag = LabeledTextField("Tag", knowledgeTag);
             knowledgeName = LabeledTextField("Name", knowledgeName);
-            GUILayout.Label("Text");
-            knowledgeText = GUILayout.TextArea(knowledgeText ?? "", GUILayout.MinHeight(80));
-            GUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Text");
+            knowledgeText = EditorGUILayout.TextArea(knowledgeText ?? "", GUILayout.MinHeight(80));
+            EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("Wissen speichern"))
             {
-                StartCoroutine(UpsertKnowledge());
+                StartEditorCoroutine(UpsertKnowledge());
             }
             if (GUILayout.Button("Felder leeren"))
             {
@@ -275,43 +301,73 @@ public class ProjectManagerUI : MonoBehaviour
                 knowledgeName = "";
                 knowledgeText = "";
             }
-            GUILayout.EndHorizontal();
-            GUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.EndVertical();
 
-            GUILayout.Label("Vorhandenes Wissen");
+            EditorGUILayout.LabelField("Vorhandenes Wissen", EditorStyles.boldLabel);
             if (knowledgeEntries.Length == 0)
             {
-                GUILayout.Label("Keine Einträge.");
+                EditorGUILayout.LabelField("Keine Einträge.");
             }
             else
             {
                 foreach (var entry in knowledgeEntries)
                 {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label($"{entry.tag}/{entry.name}", GUILayout.Width(220));
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField($"{entry.tag}/{entry.name}", GUILayout.Width(220));
                     if (GUILayout.Button("Laden", GUILayout.Width(70)))
                     {
-                        StartCoroutine(ReadKnowledge(entry.tag, entry.name));
+                        StartEditorCoroutine(ReadKnowledge(entry.tag, entry.name));
                     }
                     if (GUILayout.Button("Löschen", GUILayout.Width(70)))
                     {
-                        StartCoroutine(DeleteKnowledge(entry.tag, entry.name));
+                        StartEditorCoroutine(DeleteKnowledge(entry.tag, entry.name));
                     }
-                    GUILayout.EndHorizontal();
+                    EditorGUILayout.EndHorizontal();
                 }
             }
         }
 
-        GUILayout.EndScrollView();
-        GUILayout.EndArea();
+        EditorGUILayout.EndScrollView();
     }
 
-    private string LabeledTextField(string label, string value)
+    private static void StartEditorCoroutine(IEnumerator routine)
     {
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(label, GUILayout.Width(150));
-        value = GUILayout.TextField(value ?? "");
-        GUILayout.EndHorizontal();
+        if (routine == null)
+        {
+            return;
+        }
+
+        if (ActiveCoroutines.Count == 0)
+        {
+            EditorApplication.update += UpdateCoroutines;
+        }
+
+        ActiveCoroutines.Add(new EditorCoroutine(routine));
+    }
+
+    private static void UpdateCoroutines()
+    {
+        for (var i = ActiveCoroutines.Count - 1; i >= 0; i--)
+        {
+            if (!ActiveCoroutines[i].MoveNext())
+            {
+                ActiveCoroutines.RemoveAt(i);
+            }
+        }
+
+        if (ActiveCoroutines.Count == 0)
+        {
+            EditorApplication.update -= UpdateCoroutines;
+        }
+    }
+
+    private static string LabeledTextField(string label, string value)
+    {
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField(label, GUILayout.Width(150));
+        value = EditorGUILayout.TextField(value ?? "");
+        EditorGUILayout.EndHorizontal();
         return value;
     }
 
@@ -540,7 +596,7 @@ public class ProjectManagerUI : MonoBehaviour
         }
     }
 
-    private UnityWebRequest BuildPost(string url, object payload)
+    private static UnityWebRequest BuildPost(string url, object payload)
     {
         var json = JsonUtility.ToJson(payload);
         var body = Encoding.UTF8.GetBytes(json);
@@ -579,3 +635,4 @@ public class ProjectManagerUI : MonoBehaviour
         return string.Join(", ", values);
     }
 }
+#endif
