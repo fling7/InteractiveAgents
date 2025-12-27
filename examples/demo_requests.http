@@ -1,0 +1,21 @@
+### Health
+GET http://127.0.0.1:8787/health
+
+### Setup (lädt Beispiele aus ./examples)
+POST http://127.0.0.1:8787/setup
+Content-Type: application/json
+
+{
+  "room_plan_path": "examples/room_plan.example.json",
+  "agents_path": "examples/agents.example.json"
+}
+
+### Chat
+POST http://127.0.0.1:8787/chat
+Content-Type: application/json
+
+{
+  "session_id": "{{session_id}}",
+  "active_agent_id": "agent_tech",
+  "user_text": "Was kostet euer Produkt und gibt es Mengenrabatt?"
+}

@@ -1,0 +1,14 @@
+{
+  "openai_api_key": "",
+  "openai_base_url": "https://api.openai.com/v1/responses",
+  "model": "gpt-4.1",
+  "server_host": "127.0.0.1",
+  "server_port": 8787,
+  "max_history_turns": 20,
+  "max_handoffs": 1,
+  "kb_root": "kb",
+  "kb_chunk_chars": 900,
+  "kb_max_snippets": 4,
+  "temperature": 0.3,
+  "timeout_seconds": 60
+}
