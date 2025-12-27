@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
@@ -28,11 +29,18 @@ public class QuickAgentManager : MonoBehaviour
     public Color activeAgentColor = new Color(1f, 0.85f, 0.2f);
     public float activeAgentEmission = 0.6f;
     public float bubbleHeight = 1.6f;
-    public float bubbleDuration = 3.5f;
-    public float bubbleStagger = 0.25f;
-    public float handoffDelay = 0.8f;
-    public float handoffIndicatorDuration = 1.2f;
+    public float bubbleDuration = 6f;
+    public float bubbleStagger = 0.6f;
+    public float handoffDelay = 1.4f;
+    public float handoffIndicatorDuration = 2.4f;
     public float handoffLineWidth = 0.06f;
+
+    [Header("Camera Movement")]
+    public bool enableFreeMovement = true;
+    public float cameraMoveSpeed = 4f;
+    public float cameraBoostMultiplier = 2f;
+    public float cameraLookSpeed = 2f;
+    public float cameraLookClamp = 80f;
 
     [Serializable]
     public class Vector3Data { public float x; public float y; public float z; }
@@ -131,6 +139,9 @@ public class QuickAgentManager : MonoBehaviour
     private float handoffLineExpiresAt;
     private string handoffFromId;
     private string handoffToId;
+    private float cameraYaw;
+    private float cameraPitch;
+    private bool cameraInitialized;
 
     private void Start()
     {
@@ -140,6 +151,8 @@ public class QuickAgentManager : MonoBehaviour
 
     private void Update()
     {
+        UpdateFreeMovement();
+
         if (TryGetSelectPosition(out var screenPosition))
         {
             TrySelectAgentFromClick(screenPosition);
@@ -378,6 +391,12 @@ public class QuickAgentManager : MonoBehaviour
             {
                 return extracted.Trim();
             }
+
+            extracted = TryExtractSayFromLooseJson(normalized);
+            if (!string.IsNullOrWhiteSpace(extracted))
+            {
+                return extracted.Trim();
+            }
         }
 
         var jsonStart = normalized.IndexOf('{');
@@ -386,6 +405,12 @@ public class QuickAgentManager : MonoBehaviour
         {
             var jsonCandidate = normalized.Substring(jsonStart, jsonEnd - jsonStart + 1);
             var extracted = TryExtractSayFromJson(jsonCandidate);
+            if (!string.IsNullOrWhiteSpace(extracted))
+            {
+                return extracted.Trim();
+            }
+
+            extracted = TryExtractSayFromLooseJson(jsonCandidate);
             if (!string.IsNullOrWhiteSpace(extracted))
             {
                 return extracted.Trim();
@@ -431,6 +456,47 @@ public class QuickAgentManager : MonoBehaviour
         }
 
         return null;
+    }
+
+    private string TryExtractSayFromLooseJson(string jsonLike)
+    {
+        if (string.IsNullOrWhiteSpace(jsonLike))
+        {
+            return null;
+        }
+
+        var antwort = ExtractLooseField(jsonLike, "antwort");
+        var rueckfrage = ExtractLooseField(jsonLike, "rueckfrage");
+        if (string.IsNullOrWhiteSpace(antwort) && string.IsNullOrWhiteSpace(rueckfrage))
+        {
+            return null;
+        }
+
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(antwort))
+        {
+            parts.Add(antwort.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(rueckfrage))
+        {
+            parts.Add($"Rückfrage: {rueckfrage.Trim()}");
+        }
+
+        return string.Join("\n\n", parts);
+    }
+
+    private string ExtractLooseField(string jsonLike, string field)
+    {
+        var pattern = $"\\\"{Regex.Escape(field)}\\\"\\s*:\\s*\\\"(?<value>[\\s\\S]*?)\\\"";
+        var match = Regex.Match(jsonLike, pattern, RegexOptions.Singleline);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var value = match.Groups["value"].Value;
+        return value.Replace("\\n", "\n").Replace("\\r", "\r").Replace("\\t", "\t").Replace("\\\"", "\"");
     }
 
     private void OnGUI()
@@ -506,6 +572,7 @@ public class QuickAgentManager : MonoBehaviour
 
         GUILayout.Space(6);
         GUILayout.Label("Interaktion: Linksklick auf Box wählt Agenten.");
+        GUILayout.Label("Freie Kamera: WASD + QE, rechte Maustaste zum Umschauen.");
         GUILayout.EndScrollView();
         GUILayout.EndArea();
     }
@@ -572,7 +639,7 @@ public class QuickAgentManager : MonoBehaviour
 
             SetBubble(resp.handoff.from, handoffText, handoffIndicatorDuration);
             ShowHandoffLine(resp.handoff.from, resp.handoff.to, handoffIndicatorDuration + handoffDelay);
-            yield return new WaitForSeconds(handoffDelay);
+            yield return new WaitForSeconds(handoffIndicatorDuration + handoffDelay);
             ClearBubble(resp.handoff.from);
         }
 
@@ -796,6 +863,82 @@ public class QuickAgentManager : MonoBehaviour
         chatLog.Add($"[Du] {toSend}");
         chatInput = "";
         StartCoroutine(SendChat(toSend));
+    }
+
+    private void UpdateFreeMovement()
+    {
+        if (!enableFreeMovement)
+        {
+            return;
+        }
+
+        var cam = Camera.main;
+        if (cam == null)
+        {
+            return;
+        }
+
+        if (!cameraInitialized)
+        {
+            var euler = cam.transform.rotation.eulerAngles;
+            cameraYaw = euler.y;
+            cameraPitch = euler.x;
+            cameraInitialized = true;
+        }
+
+        var move = Vector3.zero;
+        var lookDelta = Vector2.zero;
+        var isLooking = false;
+        var isBoost = false;
+
+#if ENABLE_INPUT_SYSTEM
+        var keyboard = Keyboard.current;
+        if (keyboard != null)
+        {
+            if (keyboard.wKey.isPressed) move += Vector3.forward;
+            if (keyboard.sKey.isPressed) move += Vector3.back;
+            if (keyboard.aKey.isPressed) move += Vector3.left;
+            if (keyboard.dKey.isPressed) move += Vector3.right;
+            if (keyboard.qKey.isPressed) move += Vector3.down;
+            if (keyboard.eKey.isPressed) move += Vector3.up;
+            isBoost = keyboard.leftShiftKey.isPressed || keyboard.rightShiftKey.isPressed;
+        }
+
+        var mouse = Mouse.current;
+        if (mouse != null && mouse.rightButton.isPressed)
+        {
+            isLooking = true;
+            lookDelta = mouse.delta.ReadValue();
+        }
+#elif ENABLE_LEGACY_INPUT_MANAGER
+        if (Input.GetKey(KeyCode.W)) move += Vector3.forward;
+        if (Input.GetKey(KeyCode.S)) move += Vector3.back;
+        if (Input.GetKey(KeyCode.A)) move += Vector3.left;
+        if (Input.GetKey(KeyCode.D)) move += Vector3.right;
+        if (Input.GetKey(KeyCode.Q)) move += Vector3.down;
+        if (Input.GetKey(KeyCode.E)) move += Vector3.up;
+        isBoost = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+        if (Input.GetMouseButton(1))
+        {
+            isLooking = true;
+            lookDelta = new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"));
+        }
+#endif
+
+        if (isLooking)
+        {
+            cameraYaw += lookDelta.x * cameraLookSpeed;
+            cameraPitch = Mathf.Clamp(cameraPitch - lookDelta.y * cameraLookSpeed, -cameraLookClamp, cameraLookClamp);
+            cam.transform.rotation = Quaternion.Euler(cameraPitch, cameraYaw, 0f);
+        }
+
+        if (move.sqrMagnitude > 0.001f)
+        {
+            var speed = cameraMoveSpeed * (isBoost ? cameraBoostMultiplier : 1f);
+            var direction = cam.transform.TransformDirection(move.normalized);
+            cam.transform.position += direction * speed * Time.deltaTime;
+        }
     }
 
     [System.Serializable]
