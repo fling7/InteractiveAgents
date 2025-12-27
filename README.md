@@ -114,8 +114,27 @@ Antwort enthält eine `events`‑Liste, z.B. bei Handoff:
 Unter `unity_scripts/` liegen **Beispiel‑C#‑Skripte** (kein komplettes Unity‑Projekt).
 - `BackendClient.cs`: REST‑Calls zu `/setup` und `/chat`
 - `AgentSpawnPoint.cs`: markiert Spawnpoints im Raum (optional)
+- `QuickAgentManager.cs`: **alles‑in‑einem** Script für ein leeres Unity‑Projekt (GUI, Setup, Spawning, Chat)
 
 Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
+
+### Quick Start (leeres Unity‑Projekt)
+1. **Backend starten** (siehe Abschnitt „Start in PyCharm“). Server läuft auf `http://127.0.0.1:8787`.
+2. Neues Unity‑Projekt erstellen (3D).
+3. In Unity unter `Assets/` ein neues C#‑Script anlegen und **Inhalt von** `unity_scripts/QuickAgentManager.cs` **einfügen**.
+4. Script auf ein leeres GameObject ziehen (z.B. `AgentManager`).
+5. **Play** drücken.
+
+**Was passiert dann?**
+- Das Script ruft automatisch `POST /setup` auf, um die Agentenanzahl zu ermitteln.
+- Für jeden Agenten wird eine **zufällige Box** in der Szene erstellt.
+- Im **Play‑Modus** kannst du die Agenten auswählen (Linksklick auf Box oder per UI‑Liste).
+- Über das UI kannst du Chat‑Nachrichten senden.
+
+**Wichtige Felder im Inspector**
+- `Backend Base Url`: URL des Backends (Standard `http://127.0.0.1:8787`).
+- `Room Plan Path` / `Agents Path`: Pfade, die der Server kennt (Standard nutzt die Beispiel‑Dateien aus diesem Repo).
+- `Spawn Area`: Bereich, in dem die Boxen zufällig platziert werden.
 
 ---
 
