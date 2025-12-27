@@ -40,9 +40,50 @@ def _print_setup_instructions(root: Path) -> None:
     print("\n[Setup] Projekt-Setup")
     print(f"- Lege deine Konfiguration an: {root / 'config.json'}")
     print("  (Vorlage: config.example.json im Projektroot)")
+    print("- Beim Start kannst du wählen, ob du eigene Dateien oder das Beispiel nutzt.")
     print("- Wissensbasis: Lege Dateien in kb/<tag>/... ab, z. B. kb/common/intro.txt")
     print("- Agenten/Room-Plan: Nutze examples/agents.example.json und examples/room_plan.example.json")
     print("- API-Check: GET /health auf dem Server")
+
+
+def _prompt_choice(prompt: str, options: Dict[str, str], default: str) -> str:
+    options_line = ", ".join([f"{key}={label}" for key, label in options.items()])
+    prompt_line = f"{prompt} ({options_line}) [Default: {default}]: "
+    while True:
+        raw = input(prompt_line).strip().lower()
+        if not raw:
+            return default
+        if raw in options:
+            return raw
+        print(f"Ungültige Auswahl: '{raw}'. Bitte erneut versuchen.")
+
+
+def _prompt_rel_path(root: Path, label: str, default_rel: str) -> str:
+    while True:
+        raw = input(f"{label} (relativ zum Projekt) [Default: {default_rel}]: ").strip()
+        rel = raw or default_rel
+        candidate = (root / rel).resolve()
+        if root in candidate.parents or candidate == root:
+            if candidate.exists():
+                return rel
+            print(f"Datei nicht gefunden: {rel}")
+        else:
+            print("Ungültiger Pfad (außerhalb Projekt).")
+
+
+def _select_setup_paths(root: Path) -> tuple[str, str]:
+    print("\n[Setup] Datenquelle wählen")
+    options = {"1": "Beispiel-Daten", "2": "Eigene Dateien"}
+    choice = _prompt_choice("Bitte wählen", options, default="1")
+    default_room = "examples/room_plan.example.json"
+    default_agents = "examples/agents.example.json"
+    if choice == "1":
+        print("[Setup] Beispiel-Daten aktiviert.")
+        return default_room, default_agents
+    print("[Setup] Eigene Dateien auswählen.")
+    room_path = _prompt_rel_path(root, "Pfad zur room_plan.json", default_room)
+    agents_path = _prompt_rel_path(root, "Pfad zur agents.json", default_agents)
+    return room_path, agents_path
 
 
 def _prompt_openai_key() -> str:
@@ -122,6 +163,13 @@ def run() -> None:
     root = _project_root()
     _print_setup_instructions(root)
 
+    if sys.stdin.isatty():
+        default_room_plan_path, default_agents_path = _select_setup_paths(root)
+    else:
+        default_room_plan_path = "examples/room_plan.example.json"
+        default_agents_path = "examples/agents.example.json"
+        print("[Setup] Kein interaktives Terminal erkannt, nutze Beispiel-Daten.")
+
     kb = KnowledgeBase(root / cfg.kb_root, chunk_chars=cfg.kb_chunk_chars)
     store = SessionStore(
         max_history_turns=cfg.max_history_turns,
@@ -135,6 +183,8 @@ def run() -> None:
             base_url=cfg.openai_base_url,
             timeout_seconds=cfg.timeout_seconds,
         ),
+        default_room_plan_path=default_room_plan_path,
+        default_agents_path=default_agents_path,
     )
 
     print("[Backend] KnowledgeBase geladen:", kb.summary())

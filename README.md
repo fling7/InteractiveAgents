@@ -18,12 +18,14 @@ Ziele:
 2. Datei **`main.py`** starten (Play).
 3. Beim ersten Start:
    - Wenn `openai_api_key` in `config.json` leer ist, fragt das Backend im Terminal nach dem Key und speichert ihn.
+4. Beim Start kannst du auswählen, ob du **Beispiel-Daten** oder **eigene Dateien** laden möchtest.
 
 Server läuft dann standardmäßig auf:
 - `http://127.0.0.1:8787`
 
 Teste mit:
 - `GET /health`
+- `POST /setup` ohne Payload nutzt die beim Start gewählten Pfade (oder die Beispiel-Daten).
 
 ---
 
