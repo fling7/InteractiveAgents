@@ -127,16 +127,33 @@ public class ProjectManagerUI : EditorWindow
 
     private class EditorCoroutine
     {
-        private readonly IEnumerator routine;
+        private readonly Stack<IEnumerator> routineStack = new Stack<IEnumerator>();
 
         public EditorCoroutine(IEnumerator routine)
         {
-            this.routine = routine;
+            if (routine != null)
+            {
+                routineStack.Push(routine);
+            }
         }
 
         public bool MoveNext()
         {
-            return routine.MoveNext();
+            while (routineStack.Count > 0)
+            {
+                var current = routineStack.Peek();
+                if (current.MoveNext())
+                {
+                    if (current.Current is IEnumerator nested)
+                    {
+                        routineStack.Push(nested);
+                        continue;
+                    }
+                    return true;
+                }
+                routineStack.Pop();
+            }
+            return false;
         }
     }
 
