@@ -394,9 +394,21 @@ public class ProjectManagerUI : EditorWindow
         Debug.Log($"[ProjectManagerUI] {message}");
     }
 
+    private void LogStep(string step, string detail = null)
+    {
+        if (string.IsNullOrEmpty(detail))
+        {
+            LogStatus($"Schritt: {step}");
+        }
+        else
+        {
+            LogStatus($"Schritt: {step} - {detail}");
+        }
+    }
+
     private IEnumerator RefreshProjects()
     {
-        LogStatus("Projekte laden...");
+        LogStep("Projekte laden", "GET /projects");
         var url = $"{backendBaseUrl}/projects";
         using (var req = UnityWebRequest.Get(url))
         {
@@ -405,7 +417,7 @@ public class ProjectManagerUI : EditorWindow
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
+                LogStatus("Fehler beim Laden der Projekte: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
             var resp = JsonUtility.FromJson<ProjectListResponse>(req.downloadHandler.text);
@@ -416,7 +428,12 @@ public class ProjectManagerUI : EditorWindow
 
     private IEnumerator CreateProject()
     {
-        LogStatus("Projekt erstellen...");
+        if (string.IsNullOrWhiteSpace(newProjectName))
+        {
+            LogStatus("Projektname fehlt.");
+            yield break;
+        }
+        LogStep("Projekt erstellen", "POST /projects/create");
         var payload = new CreateProjectRequest
         {
             display_name = newProjectName,
@@ -425,17 +442,20 @@ public class ProjectManagerUI : EditorWindow
         };
         var url = $"{backendBaseUrl}/projects/create";
         var ok = false;
-        yield return SendJson(url, payload, success => ok = success);
+        yield return SendJson(url, payload, success => ok = success, "Projekt erstellen");
         if (!ok)
         {
             yield break;
         }
+        newProjectName = "";
+        newProjectId = "";
+        newProjectDescription = "";
         yield return RefreshProjects();
     }
 
     private IEnumerator LoadProject(string projectId)
     {
-        LogStatus("Projekt laden...");
+        LogStep("Projekt laden", $"GET /projects/{projectId}");
         var url = $"{backendBaseUrl}/projects/{projectId}";
         using (var req = UnityWebRequest.Get(url))
         {
@@ -444,7 +464,7 @@ public class ProjectManagerUI : EditorWindow
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
+                LogStatus("Fehler beim Laden des Projekts: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
             var resp = JsonUtility.FromJson<ProjectDetailResponse>(req.downloadHandler.text);
@@ -484,14 +504,21 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        LogStatus("Metadaten speichern...");
+        LogStep("Metadaten speichern", $"POST /projects/{currentProject.id}/metadata");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/metadata";
         var payload = new MetadataSaveRequest
         {
             display_name = currentProject.display_name,
             description = currentProject.description,
         };
-        yield return SendJson(url, payload, null);
+        var ok = false;
+        yield return SendJson(url, payload, success => ok = success, "Metadaten speichern");
+        if (!ok)
+        {
+            yield break;
+        }
+        yield return RefreshProjects();
+        yield return LoadProject(currentProject.id);
     }
 
     private IEnumerator SaveAgents()
@@ -500,7 +527,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        LogStatus("Agenten speichern...");
+        LogStep("Agenten speichern", $"POST /projects/{currentProject.id}/agents");
         var agents = new List<AgentSpec>();
         foreach (var agent in agentUiList)
         {
@@ -517,7 +544,7 @@ public class ProjectManagerUI : EditorWindow
         }
         var payload = new AgentsSaveRequest { agents = agents.ToArray() };
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/agents";
-        yield return SendJson(url, payload, null);
+        yield return SendJson(url, payload, null, "Agenten speichern");
     }
 
     private IEnumerator UpsertKnowledge()
@@ -526,7 +553,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        LogStatus("Wissen speichern...");
+        LogStep("Wissen speichern", $"POST /projects/{currentProject.id}/knowledge");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/knowledge";
         var payload = new KnowledgeUpsertRequest
         {
@@ -536,7 +563,7 @@ public class ProjectManagerUI : EditorWindow
             text = knowledgeText,
             overwrite = true,
         };
-        yield return SendJson(url, payload, null);
+        yield return SendJson(url, payload, null, "Wissen speichern");
         yield return RefreshKnowledge();
     }
 
@@ -546,7 +573,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        LogStatus("Wissen löschen...");
+        LogStep("Wissen löschen", $"POST /projects/{currentProject.id}/knowledge");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/knowledge";
         var payload = new KnowledgeUpsertRequest
         {
@@ -556,7 +583,7 @@ public class ProjectManagerUI : EditorWindow
             text = "",
             overwrite = true,
         };
-        yield return SendJson(url, payload, null);
+        yield return SendJson(url, payload, null, "Wissen löschen");
         yield return RefreshKnowledge();
     }
 
@@ -566,7 +593,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        LogStatus("Wissen laden...");
+        LogStep("Wissen laden", $"POST /projects/{currentProject.id}/knowledge/read");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/knowledge/read";
         var payload = new KnowledgeReadRequest
         {
@@ -600,6 +627,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
+        LogStep("Wissensliste laden", $"GET /projects/{currentProject.id}/knowledge");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/knowledge";
         using (var req = UnityWebRequest.Get(url))
         {
@@ -608,7 +636,7 @@ public class ProjectManagerUI : EditorWindow
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
+                LogStatus("Fehler beim Laden der Wissensliste: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
             var resp = JsonUtility.FromJson<KnowledgeListResponse>(req.downloadHandler.text);
@@ -617,7 +645,7 @@ public class ProjectManagerUI : EditorWindow
         }
     }
 
-    private IEnumerator SendJson(string url, object payload, Action<bool> onComplete)
+    private IEnumerator SendJson(string url, object payload, Action<bool> onComplete, string actionLabel = null)
     {
         using (var req = BuildPost(url, payload))
         {
@@ -626,12 +654,20 @@ public class ProjectManagerUI : EditorWindow
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                LogStatus($"Fehler: {req.error} (HTTP {req.responseCode}) | {req.downloadHandler.text}");
+                var label = string.IsNullOrEmpty(actionLabel) ? "Anfrage" : actionLabel;
+                LogStatus($"{label} fehlgeschlagen: {req.error} (HTTP {req.responseCode}) | {req.downloadHandler.text}");
                 onComplete?.Invoke(false);
             }
             else
             {
-                LogStatus("OK");
+                if (!string.IsNullOrEmpty(actionLabel))
+                {
+                    LogStatus($"{actionLabel} abgeschlossen.");
+                }
+                else
+                {
+                    LogStatus("OK");
+                }
                 onComplete?.Invoke(true);
             }
         }
