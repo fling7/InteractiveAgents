@@ -626,7 +626,7 @@ public class ProjectManagerUI : EditorWindow
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
+                LogStatus($"Fehler: {req.error} (HTTP {req.responseCode}) | {req.downloadHandler.text}");
                 onComplete?.Invoke(false);
             }
             else
@@ -643,8 +643,11 @@ public class ProjectManagerUI : EditorWindow
         var body = Encoding.UTF8.GetBytes(json);
         var req = new UnityWebRequest(url, "POST");
         req.uploadHandler = new UploadHandlerRaw(body);
+        req.uploadHandler.contentType = "application/json";
         req.downloadHandler = new DownloadHandlerBuffer();
         req.SetRequestHeader("Content-Type", "application/json");
+        req.SetRequestHeader("Accept", "application/json");
+        req.chunkedTransfer = false;
         return req;
     }
 
