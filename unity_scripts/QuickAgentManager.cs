@@ -24,6 +24,16 @@ public class QuickAgentManager : MonoBehaviour
     public bool showUi = true;
     public Rect uiRect = new Rect(10, 10, 420, 520);
 
+    [Header("Agent Visuals")]
+    public Color activeAgentColor = new Color(1f, 0.85f, 0.2f);
+    public float activeAgentEmission = 0.6f;
+    public float bubbleHeight = 1.6f;
+    public float bubbleDuration = 3.5f;
+    public float bubbleStagger = 0.25f;
+    public float handoffDelay = 0.8f;
+    public float handoffIndicatorDuration = 1.2f;
+    public float handoffLineWidth = 0.06f;
+
     [Serializable]
     public class Vector3Data { public float x; public float y; public float z; }
 
@@ -91,7 +101,22 @@ public class QuickAgentManager : MonoBehaviour
     public string sessionId;
     public string activeAgentId;
 
-    private readonly Dictionary<string, GameObject> agentObjects = new Dictionary<string, GameObject>();
+    private class AgentVisual
+    {
+        public GameObject obj;
+        public Renderer renderer;
+        public Color baseColor;
+        public float scale;
+    }
+
+    private class BubbleInfo
+    {
+        public string text;
+        public float expiresAt;
+    }
+
+    private readonly Dictionary<string, AgentVisual> agentObjects = new Dictionary<string, AgentVisual>();
+    private readonly Dictionary<string, BubbleInfo> agentBubbles = new Dictionary<string, BubbleInfo>();
     private readonly List<string> chatLog = new List<string>();
     private AgentPlacement[] lastAgents;
     private string statusMessage = "";
@@ -100,6 +125,12 @@ public class QuickAgentManager : MonoBehaviour
     private Vector2 agentScroll;
     private Vector2 chatScroll;
     private Vector2 uiScroll;
+    private GUIStyle bubbleStyle;
+    private GUIStyle bubblePointerStyle;
+    private LineRenderer handoffLine;
+    private float handoffLineExpiresAt;
+    private string handoffFromId;
+    private string handoffToId;
 
     private void Start()
     {
@@ -113,6 +144,9 @@ public class QuickAgentManager : MonoBehaviour
         {
             TrySelectAgentFromClick(screenPosition);
         }
+
+        CleanupExpiredBubbles();
+        UpdateHandoffLine();
     }
 
     private void EnsureSceneBasics()
@@ -167,7 +201,7 @@ public class QuickAgentManager : MonoBehaviour
             SpawnAgents(lastAgents);
             if (lastAgents.Length > 0)
             {
-                activeAgentId = lastAgents[0].id;
+                SetActiveAgentId(lastAgents[0].id);
             }
         }
     }
@@ -176,9 +210,9 @@ public class QuickAgentManager : MonoBehaviour
     {
         foreach (var entry in agentObjects)
         {
-            if (entry.Value != null)
+            if (entry.Value != null && entry.Value.obj != null)
             {
-                Destroy(entry.Value);
+                Destroy(entry.Value.obj);
             }
         }
         agentObjects.Clear();
@@ -202,13 +236,23 @@ public class QuickAgentManager : MonoBehaviour
             cube.transform.localScale = Vector3.one * scale;
 
             var renderer = cube.GetComponent<Renderer>();
+            var baseColor = Color.white;
             if (renderer != null)
             {
-                renderer.material.color = Color.Lerp(new Color(0.3f, 0.6f, 1f), Color.white, 0.2f * i);
+                baseColor = Color.Lerp(new Color(0.3f, 0.6f, 1f), Color.white, 0.2f * i);
+                renderer.material.color = baseColor;
             }
 
-            agentObjects[id] = cube;
+            agentObjects[id] = new AgentVisual
+            {
+                obj = cube,
+                renderer = renderer,
+                baseColor = baseColor,
+                scale = scale
+            };
         }
+
+        UpdateAgentHighlights();
     }
 
     private bool TryGetSelectPosition(out Vector2 screenPosition)
@@ -244,10 +288,9 @@ public class QuickAgentManager : MonoBehaviour
         {
             foreach (var pair in agentObjects)
             {
-                if (pair.Value == hit.collider.gameObject)
+                if (pair.Value != null && pair.Value.obj == hit.collider.gameObject)
                 {
-                    activeAgentId = pair.Key;
-                    statusMessage = $"Aktiver Agent: {activeAgentId}";
+                    SetActiveAgentId(pair.Key, true);
                     return;
                 }
             }
@@ -294,8 +337,9 @@ public class QuickAgentManager : MonoBehaviour
 
             var resp = JsonUtility.FromJson<ChatResponse>(req.downloadHandler.text);
             sessionId = resp.session_id;
-            activeAgentId = resp.active_agent_id;
+            SetActiveAgentId(resp.active_agent_id);
             AppendChatEvents(resp.events);
+            StartCoroutine(ShowChatBubbles(resp));
         }
     }
 
@@ -391,6 +435,7 @@ public class QuickAgentManager : MonoBehaviour
 
     private void OnGUI()
     {
+        DrawAgentBubbles();
         if (!showUi)
         {
             return;
@@ -425,8 +470,7 @@ public class QuickAgentManager : MonoBehaviour
                 var label = string.IsNullOrEmpty(agent.display_name) ? id : $"{agent.display_name} ({id})";
                 if (GUILayout.Button(label))
                 {
-                    activeAgentId = id;
-                    statusMessage = $"Aktiver Agent: {activeAgentId}";
+                    SetActiveAgentId(id, true);
                 }
             }
         }
@@ -464,6 +508,281 @@ public class QuickAgentManager : MonoBehaviour
         GUILayout.Label("Interaktion: Linksklick auf Box wählt Agenten.");
         GUILayout.EndScrollView();
         GUILayout.EndArea();
+    }
+
+    private void SetActiveAgentId(string id, bool updateStatus = false)
+    {
+        if (string.IsNullOrEmpty(id))
+        {
+            return;
+        }
+
+        activeAgentId = id;
+        if (updateStatus)
+        {
+            statusMessage = $"Aktiver Agent: {activeAgentId}";
+        }
+        UpdateAgentHighlights();
+    }
+
+    private void UpdateAgentHighlights()
+    {
+        foreach (var pair in agentObjects)
+        {
+            var visual = pair.Value;
+            if (visual == null || visual.renderer == null)
+            {
+                continue;
+            }
+
+            var isActive = pair.Key == activeAgentId;
+            var color = isActive ? activeAgentColor : visual.baseColor;
+            visual.renderer.material.color = color;
+            if (visual.renderer.material.HasProperty("_EmissionColor"))
+            {
+                if (isActive)
+                {
+                    visual.renderer.material.EnableKeyword("_EMISSION");
+                    visual.renderer.material.SetColor("_EmissionColor", color * activeAgentEmission);
+                }
+                else
+                {
+                    visual.renderer.material.SetColor("_EmissionColor", Color.black);
+                }
+            }
+        }
+    }
+
+    private IEnumerator ShowChatBubbles(ChatResponse resp)
+    {
+        if (resp == null)
+        {
+            yield break;
+        }
+
+        if (resp.handoff != null
+            && !string.IsNullOrWhiteSpace(resp.handoff.from)
+            && !string.IsNullOrWhiteSpace(resp.handoff.to))
+        {
+            var handoffText = $"Leitet weiter an {resp.handoff.to}";
+            if (!string.IsNullOrWhiteSpace(resp.handoff.reason))
+            {
+                handoffText = $"{handoffText}\n{resp.handoff.reason}";
+            }
+
+            SetBubble(resp.handoff.from, handoffText, handoffIndicatorDuration);
+            ShowHandoffLine(resp.handoff.from, resp.handoff.to, handoffIndicatorDuration + handoffDelay);
+            yield return new WaitForSeconds(handoffDelay);
+            ClearBubble(resp.handoff.from);
+        }
+
+        if (resp.events == null)
+        {
+            yield break;
+        }
+
+        foreach (var ev in resp.events)
+        {
+            if (string.IsNullOrWhiteSpace(ev.agent_id))
+            {
+                continue;
+            }
+
+            var text = NormalizeChatText(ev.text);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            SetBubble(ev.agent_id, text, bubbleDuration);
+            yield return new WaitForSeconds(bubbleStagger);
+        }
+    }
+
+    private void SetBubble(string agentId, string text, float duration)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+        {
+            return;
+        }
+
+        agentBubbles[agentId] = new BubbleInfo
+        {
+            text = text,
+            expiresAt = Time.time + duration
+        };
+    }
+
+    private void ClearBubble(string agentId)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+        {
+            return;
+        }
+
+        agentBubbles.Remove(agentId);
+    }
+
+    private void CleanupExpiredBubbles()
+    {
+        if (agentBubbles.Count == 0)
+        {
+            return;
+        }
+
+        var now = Time.time;
+        var toRemove = new List<string>();
+        foreach (var pair in agentBubbles)
+        {
+            if (pair.Value == null || pair.Value.expiresAt <= now)
+            {
+                toRemove.Add(pair.Key);
+            }
+        }
+
+        for (var i = 0; i < toRemove.Count; i++)
+        {
+            agentBubbles.Remove(toRemove[i]);
+        }
+    }
+
+    private void DrawAgentBubbles()
+    {
+        if (agentBubbles.Count == 0)
+        {
+            return;
+        }
+
+        var cam = Camera.main;
+        if (cam == null)
+        {
+            return;
+        }
+
+        EnsureBubbleStyles();
+
+        foreach (var pair in agentBubbles)
+        {
+            if (!agentObjects.TryGetValue(pair.Key, out var visual) || visual == null || visual.obj == null)
+            {
+                continue;
+            }
+
+            var content = pair.Value != null ? pair.Value.text : "";
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                continue;
+            }
+
+            var worldPos = visual.obj.transform.position + Vector3.up * (bubbleHeight + visual.scale * 0.5f);
+            var screenPos = cam.WorldToScreenPoint(worldPos);
+            if (screenPos.z <= 0f)
+            {
+                continue;
+            }
+
+            var maxWidth = 220f;
+            var height = bubbleStyle.CalcHeight(new GUIContent(content), maxWidth);
+            var rect = new Rect(
+                screenPos.x - maxWidth * 0.5f,
+                Screen.height - screenPos.y - height - 16f,
+                maxWidth,
+                height
+            );
+
+            GUI.Box(rect, content, bubbleStyle);
+            var pointerRect = new Rect(rect.x, rect.yMax - 4f, rect.width, 16f);
+            GUI.Label(pointerRect, "▼", bubblePointerStyle);
+        }
+    }
+
+    private void EnsureBubbleStyles()
+    {
+        if (bubbleStyle != null)
+        {
+            return;
+        }
+
+        bubbleStyle = new GUIStyle(GUI.skin.box)
+        {
+            alignment = TextAnchor.MiddleCenter,
+            wordWrap = true,
+            fontSize = 12
+        };
+        bubbleStyle.padding = new RectOffset(8, 8, 6, 6);
+
+        bubblePointerStyle = new GUIStyle(GUI.skin.label)
+        {
+            alignment = TextAnchor.UpperCenter,
+            fontSize = 14,
+            fontStyle = FontStyle.Bold
+        };
+    }
+
+    private void ShowHandoffLine(string fromId, string toId, float duration)
+    {
+        if (string.IsNullOrWhiteSpace(fromId) || string.IsNullOrWhiteSpace(toId))
+        {
+            return;
+        }
+
+        if (handoffLine == null)
+        {
+            var lineObject = new GameObject("HandoffLine");
+            handoffLine = lineObject.AddComponent<LineRenderer>();
+            handoffLine.material = new Material(Shader.Find("Sprites/Default"));
+            handoffLine.positionCount = 2;
+            handoffLine.startWidth = handoffLineWidth;
+            handoffLine.endWidth = handoffLineWidth;
+            handoffLine.numCapVertices = 4;
+        }
+
+        handoffFromId = fromId;
+        handoffToId = toId;
+        handoffLine.startColor = Color.yellow;
+        handoffLine.endColor = Color.yellow;
+        handoffLine.gameObject.SetActive(true);
+        handoffLineExpiresAt = Time.time + duration;
+        UpdateHandoffLinePositions();
+    }
+
+    private void UpdateHandoffLine()
+    {
+        if (handoffLine == null || !handoffLine.gameObject.activeSelf)
+        {
+            return;
+        }
+
+        if (Time.time > handoffLineExpiresAt)
+        {
+            handoffLine.gameObject.SetActive(false);
+            return;
+        }
+
+        UpdateHandoffLinePositions();
+    }
+
+    private void UpdateHandoffLinePositions()
+    {
+        if (handoffLine == null)
+        {
+            return;
+        }
+
+        if (!agentObjects.TryGetValue(handoffFromId, out var fromVisual)
+            || !agentObjects.TryGetValue(handoffToId, out var toVisual)
+            || fromVisual == null
+            || toVisual == null
+            || fromVisual.obj == null
+            || toVisual.obj == null)
+        {
+            return;
+        }
+
+        var fromPos = fromVisual.obj.transform.position + Vector3.up * (fromVisual.scale * 0.6f);
+        var toPos = toVisual.obj.transform.position + Vector3.up * (toVisual.scale * 0.6f);
+        handoffLine.SetPosition(0, fromPos);
+        handoffLine.SetPosition(1, toPos);
     }
 
     private void TrySendChatFromInput()
