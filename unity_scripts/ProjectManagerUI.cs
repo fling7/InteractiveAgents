@@ -127,33 +127,16 @@ public class ProjectManagerUI : EditorWindow
 
     private class EditorCoroutine
     {
-        private readonly Stack<IEnumerator> routineStack = new Stack<IEnumerator>();
+        private readonly IEnumerator routine;
 
         public EditorCoroutine(IEnumerator routine)
         {
-            if (routine != null)
-            {
-                routineStack.Push(routine);
-            }
+            this.routine = routine;
         }
 
         public bool MoveNext()
         {
-            while (routineStack.Count > 0)
-            {
-                var current = routineStack.Peek();
-                if (current.MoveNext())
-                {
-                    if (current.Current is IEnumerator nested)
-                    {
-                        routineStack.Push(nested);
-                        continue;
-                    }
-                    return true;
-                }
-                routineStack.Pop();
-            }
-            return false;
+            return routine.MoveNext();
         }
     }
 
@@ -626,7 +609,7 @@ public class ProjectManagerUI : EditorWindow
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                LogStatus($"Fehler: {req.error} (HTTP {req.responseCode}) | {req.downloadHandler.text}");
+                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
                 onComplete?.Invoke(false);
             }
             else
@@ -643,11 +626,8 @@ public class ProjectManagerUI : EditorWindow
         var body = Encoding.UTF8.GetBytes(json);
         var req = new UnityWebRequest(url, "POST");
         req.uploadHandler = new UploadHandlerRaw(body);
-        req.uploadHandler.contentType = "application/json";
         req.downloadHandler = new DownloadHandlerBuffer();
         req.SetRequestHeader("Content-Type", "application/json");
-        req.SetRequestHeader("Accept", "application/json");
-        req.chunkedTransfer = false;
         return req;
     }
 
