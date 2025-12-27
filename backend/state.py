@@ -96,8 +96,8 @@ class SessionStore:
     temperature: float
     openai: OpenAIResponsesClient
     project_manager: ProjectManager
-    default_room_plan_path: str = "examples/room_plan.json"
-    default_agents_path: str = "examples/agents.json"
+    default_room_plan_path: str = "examples/room_plan.example.json"
+    default_agents_path: str = "examples/agents.example.json"
     sessions: Dict[str, SessionState] = field(default_factory=dict)
     kb_cache: Dict[str, KnowledgeBase] = field(default_factory=dict)
 
@@ -149,7 +149,7 @@ class SessionStore:
         """
         Supports:
         - direct: {"room_plan": {...}, "agents": [{"..."}]}
-        - via paths: {"room_plan_path": "examples/room_plan.json", "agents_path": "examples/agents.json"}
+        - via paths: {"room_plan_path": "examples/room_plan.example.json", "agents_path": "examples/agents.example.json"}
         - via project: {"project_id": "demo_project"}
         """
         project_id = str(payload.get("project_id") or "").strip() or None
