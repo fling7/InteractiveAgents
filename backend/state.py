@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .kb import KnowledgeBase
 from .openai_client import OpenAIHTTPError, OpenAIResponsesClient
 from .placement import assign_spawn_points
+from .projects import ProjectManager
 from .schemas import npc_action_schema
 
 
@@ -75,9 +76,11 @@ class SessionState:
     session_id: str
     agents: Dict[str, AgentSpec]
     placements: Dict[str, Dict[str, Any]]
+    kb: KnowledgeBase
     history: List[Dict[str, str]] = field(default_factory=list)  # role=user|assistant, content=str
     created_ms: int = field(default_factory=_now_ms)
     updated_ms: int = field(default_factory=_now_ms)
+    project_id: Optional[str] = None
 
     def touch(self) -> None:
         self.updated_ms = _now_ms()
@@ -92,9 +95,11 @@ class SessionStore:
     model: str
     temperature: float
     openai: OpenAIResponsesClient
+    project_manager: ProjectManager
     default_room_plan_path: str = "examples/room_plan.example.json"
     default_agents_path: str = "examples/agents.example.json"
     sessions: Dict[str, SessionState] = field(default_factory=dict)
+    kb_cache: Dict[str, KnowledgeBase] = field(default_factory=dict)
 
     def _project_root(self) -> Path:
         return Path(__file__).resolve().parents[1]
@@ -106,7 +111,14 @@ class SessionStore:
             raise ValueError("Ungültiger Pfad (außerhalb Projekt).")
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def create_session(self, room_plan: Dict[str, Any], agent_dicts: List[Dict[str, Any]], session_id: Optional[str] = None) -> SessionState:
+    def create_session(
+        self,
+        room_plan: Dict[str, Any],
+        agent_dicts: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+        kb: Optional[KnowledgeBase] = None,
+        project_id: Optional[str] = None,
+    ) -> SessionState:
         if not session_id:
             session_id = str(uuid.uuid4())
 
@@ -126,7 +138,9 @@ class SessionStore:
             session_id=session_id,
             agents=agents_map,
             placements=placements,
+            kb=kb or self.kb,
             history=[],
+            project_id=project_id,
         )
         self.sessions[session_id] = st
         return st
@@ -136,10 +150,22 @@ class SessionStore:
         Supports:
         - direct: {"room_plan": {...}, "agents": [{"..."}]}
         - via paths: {"room_plan_path": "examples/room_plan.example.json", "agents_path": "examples/agents.example.json"}
+        - via project: {"project_id": "demo_project"}
         """
+        project_id = str(payload.get("project_id") or "").strip() or None
+        project_room_plan = None
+        project_agents = None
+        project_kb = None
+        if project_id:
+            project_room_plan = self.project_manager.load_room_plan(project_id)
+            project_agents = self.project_manager.load_agents(project_id).get("agents", [])
+            project_kb = self._get_project_kb(project_id)
+
         room_plan_path = payload.get("room_plan_path")
         if room_plan_path:
             room_plan = self._load_json_file(str(room_plan_path))
+        elif project_room_plan is not None:
+            room_plan = project_room_plan
         else:
             room_plan = payload.get("room_plan") or {}
             if not room_plan:
@@ -149,6 +175,8 @@ class SessionStore:
         if agents_path:
             agents_doc = self._load_json_file(str(agents_path))
             agent_dicts = agents_doc.get("agents") or []
+        elif project_agents is not None:
+            agent_dicts = project_agents
         else:
             agent_dicts = payload.get("agents") or payload.get("agent_specs") or []
             if not agent_dicts:
@@ -156,7 +184,13 @@ class SessionStore:
                 agent_dicts = agents_doc.get("agents") or []
 
         session_id = payload.get("session_id")
-        st = self.create_session(room_plan=room_plan, agent_dicts=agent_dicts, session_id=session_id)
+        st = self.create_session(
+            room_plan=room_plan,
+            agent_dicts=agent_dicts,
+            session_id=session_id,
+            kb=project_kb,
+            project_id=project_id,
+        )
 
         agents_out = []
         for aid, agent in st.agents.items():
@@ -174,6 +208,14 @@ class SessionStore:
             )
 
         return {"session_id": st.session_id, "agents": agents_out}
+
+    def _get_project_kb(self, project_id: str) -> KnowledgeBase:
+        if project_id in self.kb_cache:
+            return self.kb_cache[project_id]
+        kb_root = self.project_manager.project_kb_root(project_id)
+        kb = KnowledgeBase(kb_root, chunk_chars=self.kb.chunk_chars)
+        self.kb_cache[project_id] = kb
+        return kb
 
     # -------------------- Chat orchestration --------------------
 
@@ -232,7 +274,7 @@ class SessionStore:
                 others.append(a)
 
         # KB retrieval
-        kb_snips = self.kb.search(query=history_with_user[-1]["content"], tags=agent.knowledge_tags, k=self.kb_max_snippets)
+        kb_snips = st.kb.search(query=history_with_user[-1]["content"], tags=agent.knowledge_tags, k=self.kb_max_snippets)
 
         dev_prompt = self._build_developer_prompt(agent, others, kb_snips, allow_handoff=allow_handoff)
 
