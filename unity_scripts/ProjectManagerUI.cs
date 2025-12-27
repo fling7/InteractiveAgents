@@ -648,6 +648,7 @@ public class ProjectManagerUI : EditorWindow
         req.SetRequestHeader("Content-Type", "application/json");
         req.SetRequestHeader("Accept", "application/json");
         req.chunkedTransfer = false;
+        req.useHttpContinue = false;
         return req;
     }
 
