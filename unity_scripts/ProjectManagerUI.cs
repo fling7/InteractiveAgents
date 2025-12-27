@@ -371,27 +371,35 @@ public class ProjectManagerUI : EditorWindow
         return value;
     }
 
+    private void LogStatus(string message)
+    {
+        statusMessage = message;
+        Debug.Log($"[ProjectManagerUI] {message}");
+    }
+
     private IEnumerator RefreshProjects()
     {
-        statusMessage = "Projekte laden...";
+        LogStatus("Projekte laden...");
         var url = $"{backendBaseUrl}/projects";
         using (var req = UnityWebRequest.Get(url))
         {
+            req.timeout = 30;
+            Debug.Log($"[ProjectManagerUI] -> GET {url}");
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                statusMessage = "Fehler: " + req.error;
+                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
             var resp = JsonUtility.FromJson<ProjectListResponse>(req.downloadHandler.text);
             projects = resp?.projects ?? Array.Empty<ProjectSummary>();
-            statusMessage = "Projekte geladen: " + projects.Length;
+            LogStatus("Projekte geladen: " + projects.Length);
         }
     }
 
     private IEnumerator CreateProject()
     {
-        statusMessage = "Projekt erstellen...";
+        LogStatus("Projekt erstellen...");
         var payload = new CreateProjectRequest
         {
             display_name = newProjectName,
@@ -399,32 +407,39 @@ public class ProjectManagerUI : EditorWindow
             description = newProjectDescription,
         };
         var url = $"{backendBaseUrl}/projects/create";
-        yield return SendJson(url, payload);
+        var ok = false;
+        yield return SendJson(url, payload, success => ok = success);
+        if (!ok)
+        {
+            yield break;
+        }
         yield return RefreshProjects();
     }
 
     private IEnumerator LoadProject(string projectId)
     {
-        statusMessage = "Projekt laden...";
+        LogStatus("Projekt laden...");
         var url = $"{backendBaseUrl}/projects/{projectId}";
         using (var req = UnityWebRequest.Get(url))
         {
+            req.timeout = 30;
+            Debug.Log($"[ProjectManagerUI] -> GET {url}");
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                statusMessage = "Fehler: " + req.error + " | " + req.downloadHandler.text;
+                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
             var resp = JsonUtility.FromJson<ProjectDetailResponse>(req.downloadHandler.text);
             if (resp == null || resp.project == null)
             {
-                statusMessage = "Projekt konnte nicht geladen werden.";
+                LogStatus("Projekt konnte nicht geladen werden.");
                 yield break;
             }
             currentProject = resp.project;
             knowledgeEntries = resp.knowledge ?? Array.Empty<KnowledgeEntrySummary>();
             LoadAgentsUi(resp.agents ?? Array.Empty<AgentSpec>());
-            statusMessage = "Projekt geladen: " + currentProject.display_name;
+            LogStatus("Projekt geladen: " + currentProject.display_name);
         }
     }
 
@@ -452,14 +467,14 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        statusMessage = "Metadaten speichern...";
+        LogStatus("Metadaten speichern...");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/metadata";
         var payload = new MetadataSaveRequest
         {
             display_name = currentProject.display_name,
             description = currentProject.description,
         };
-        yield return SendJson(url, payload);
+        yield return SendJson(url, payload, null);
     }
 
     private IEnumerator SaveAgents()
@@ -468,7 +483,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        statusMessage = "Agenten speichern...";
+        LogStatus("Agenten speichern...");
         var agents = new List<AgentSpec>();
         foreach (var agent in agentUiList)
         {
@@ -485,7 +500,7 @@ public class ProjectManagerUI : EditorWindow
         }
         var payload = new AgentsSaveRequest { agents = agents.ToArray() };
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/agents";
-        yield return SendJson(url, payload);
+        yield return SendJson(url, payload, null);
     }
 
     private IEnumerator UpsertKnowledge()
@@ -494,7 +509,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        statusMessage = "Wissen speichern...";
+        LogStatus("Wissen speichern...");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/knowledge";
         var payload = new KnowledgeUpsertRequest
         {
@@ -504,7 +519,7 @@ public class ProjectManagerUI : EditorWindow
             text = knowledgeText,
             overwrite = true,
         };
-        yield return SendJson(url, payload);
+        yield return SendJson(url, payload, null);
         yield return RefreshKnowledge();
     }
 
@@ -514,7 +529,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        statusMessage = "Wissen löschen...";
+        LogStatus("Wissen löschen...");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/knowledge";
         var payload = new KnowledgeUpsertRequest
         {
@@ -524,7 +539,7 @@ public class ProjectManagerUI : EditorWindow
             text = "",
             overwrite = true,
         };
-        yield return SendJson(url, payload);
+        yield return SendJson(url, payload, null);
         yield return RefreshKnowledge();
     }
 
@@ -534,7 +549,7 @@ public class ProjectManagerUI : EditorWindow
         {
             yield break;
         }
-        statusMessage = "Wissen laden...";
+        LogStatus("Wissen laden...");
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/knowledge/read";
         var payload = new KnowledgeReadRequest
         {
@@ -543,10 +558,12 @@ public class ProjectManagerUI : EditorWindow
         };
         using (var req = BuildPost(url, payload))
         {
+            req.timeout = 30;
+            Debug.Log($"[ProjectManagerUI] -> POST {url}");
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                statusMessage = "Fehler: " + req.error + " | " + req.downloadHandler.text;
+                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
             var resp = JsonUtility.FromJson<KnowledgeReadResponse>(req.downloadHandler.text);
@@ -556,6 +573,7 @@ public class ProjectManagerUI : EditorWindow
                 knowledgeName = resp.name ?? "";
                 knowledgeText = resp.text ?? "";
             }
+            LogStatus("Wissen geladen.");
         }
     }
 
@@ -568,30 +586,36 @@ public class ProjectManagerUI : EditorWindow
         var url = $"{backendBaseUrl}/projects/{currentProject.id}/knowledge";
         using (var req = UnityWebRequest.Get(url))
         {
+            req.timeout = 30;
+            Debug.Log($"[ProjectManagerUI] -> GET {url}");
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                statusMessage = "Fehler: " + req.error;
+                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
             var resp = JsonUtility.FromJson<KnowledgeListResponse>(req.downloadHandler.text);
             knowledgeEntries = resp?.knowledge ?? Array.Empty<KnowledgeEntrySummary>();
-            statusMessage = "Wissen aktualisiert.";
+            LogStatus("Wissen aktualisiert.");
         }
     }
 
-    private IEnumerator SendJson(string url, object payload)
+    private IEnumerator SendJson(string url, object payload, Action<bool> onComplete)
     {
         using (var req = BuildPost(url, payload))
         {
+            req.timeout = 30;
+            Debug.Log($"[ProjectManagerUI] -> POST {url}");
             yield return req.SendWebRequest();
             if (req.result != UnityWebRequest.Result.Success)
             {
-                statusMessage = "Fehler: " + req.error + " | " + req.downloadHandler.text;
+                LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
+                onComplete?.Invoke(false);
             }
             else
             {
-                statusMessage = "OK";
+                LogStatus("OK");
+                onComplete?.Invoke(true);
             }
         }
     }
