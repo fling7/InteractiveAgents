@@ -130,6 +130,7 @@ public class QuickAgentManager : MonoBehaviour
     private string statusMessage = "";
     private string chatInput = "";
     private const string ChatInputControlName = "chatInputField";
+    private bool isChatInputFocused = false;
     private Vector2 agentScroll;
     private Vector2 chatScroll;
     private Vector2 uiScroll;
@@ -504,12 +505,19 @@ public class QuickAgentManager : MonoBehaviour
         DrawAgentBubbles();
         if (!showUi)
         {
+            isChatInputFocused = false;
             return;
         }
 
         var maxWidth = Mathf.Min(uiRect.width, Screen.width - uiRect.x - 10f);
         var maxHeight = Mathf.Min(uiRect.height, Screen.height - uiRect.y - 10f);
         var clampedRect = new Rect(uiRect.x, uiRect.y, maxWidth, maxHeight);
+
+        if (Event.current.type == EventType.MouseDown && !clampedRect.Contains(Event.current.mousePosition))
+        {
+            GUI.FocusControl(string.Empty);
+            isChatInputFocused = false;
+        }
 
         GUILayout.BeginArea(clampedRect, GUI.skin.box);
         uiScroll = GUILayout.BeginScrollView(uiScroll);
@@ -546,6 +554,7 @@ public class QuickAgentManager : MonoBehaviour
         GUILayout.Label("Chat:");
         GUI.SetNextControlName(ChatInputControlName);
         chatInput = GUILayout.TextField(chatInput);
+        isChatInputFocused = GUI.GetNameOfFocusedControl() == ChatInputControlName;
         if (Event.current.type == EventType.KeyDown
             && (Event.current.keyCode == KeyCode.Return
                 || Event.current.keyCode == KeyCode.KeypadEnter
@@ -868,6 +877,11 @@ public class QuickAgentManager : MonoBehaviour
     private void UpdateFreeMovement()
     {
         if (!enableFreeMovement)
+        {
+            return;
+        }
+
+        if (isChatInputFocused)
         {
             return;
         }
