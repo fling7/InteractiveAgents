@@ -149,11 +149,11 @@ public class QuickAgentManager : MonoBehaviour
     private Vector2 agentScroll;
     private Vector2 chatScroll;
     private Vector2 uiScroll;
+    private Vector2 projectScroll;
     private bool useProjectSelection = true;
     private ProjectSummary[] projects = Array.Empty<ProjectSummary>();
     private int selectedProjectIndex = -1;
     private string selectedProjectId = "";
-    private bool showProjectDropdown;
     private GUIStyle bubbleStyle;
     private GUIStyle bubblePointerStyle;
     private LineRenderer handoffLine;
@@ -627,28 +627,32 @@ public class QuickAgentManager : MonoBehaviour
             }
             else
             {
-                var currentLabel = selectedProjectIndex >= 0
-                    ? $"{projects[selectedProjectIndex].display_name} ({projects[selectedProjectIndex].id})"
-                    : "Projekt auswählen";
-
-                if (GUILayout.Button(currentLabel))
+                projectScroll = GUILayout.BeginScrollView(projectScroll, GUILayout.Height(140f));
+                for (var i = 0; i < projects.Length; i++)
                 {
-                    showProjectDropdown = !showProjectDropdown;
-                }
-
-                if (showProjectDropdown)
-                {
-                    for (var i = 0; i < projects.Length; i++)
+                    var project = projects[i];
+                    var label = $"{project.display_name} ({project.id})";
+                    var isSelected = i == selectedProjectIndex;
+                    var previousColor = GUI.backgroundColor;
+                    if (isSelected)
                     {
-                        var project = projects[i];
-                        var label = $"{project.display_name} ({project.id})";
-                        if (GUILayout.Button(label))
-                        {
-                            selectedProjectIndex = i;
-                            selectedProjectId = project.id;
-                            showProjectDropdown = false;
-                        }
+                        GUI.backgroundColor = new Color(0.35f, 0.7f, 1f, 1f);
                     }
+
+                    if (GUILayout.Button(label))
+                    {
+                        selectedProjectIndex = i;
+                        selectedProjectId = project.id;
+                    }
+
+                    GUI.backgroundColor = previousColor;
+                }
+                GUILayout.EndScrollView();
+
+                if (selectedProjectIndex >= 0)
+                {
+                    var selected = projects[selectedProjectIndex];
+                    GUILayout.Label($"Aktuelles Projekt: {selected.display_name} ({selected.id})");
                 }
             }
         }
