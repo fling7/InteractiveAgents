@@ -647,6 +647,8 @@ public class ProjectManagerUI : EditorWindow
                 knowledgeTag = resp.tag ?? "";
                 knowledgeName = resp.name ?? "";
                 knowledgeText = resp.text ?? "";
+                GUI.FocusControl(null);
+                Repaint();
             }
             LogStatus("Wissen geladen.");
         }
