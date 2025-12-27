@@ -116,7 +116,7 @@ Unter `unity_scripts/` liegen **Beispiel‑C#‑Skripte** (kein komplettes Unity
 - `AgentSpawnPoint.cs`: markiert Spawnpoints im Raum (optional)
 - `QuickAgentManager.cs`: **alles‑in‑einem** Script für ein leeres Unity‑Projekt (GUI, Setup, Spawning, Chat)
 - `AgentManagerExample.cs`: Beispiel‑Controller, der `BackendClient` nutzt und Agenten spawnt
-- `ProjectManagerUI.cs`: einfache UI‑Steuerung für Setup/Chat (Referenz in Inspector)
+- `ProjectManagerUI.cs`: Editor‑Fenster für Projekte/Agenten/Wissen (Unity‑Menüpunkt)
 - `RoomPlanExporter.cs`: exportiert Spawnpoints aus der Szene als `room_plan.json`
 
 Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
@@ -142,14 +142,11 @@ Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
 ### Nutzung der zusätzlichen Skripte
 Die folgenden Schritte zeigen, wie du die **neuen Skripte** in ein bestehendes Unity‑Projekt einbaust:
 
-#### A) Agenten mit eigener UI steuern (`AgentManagerExample.cs` + `ProjectManagerUI.cs`)
-1. Kopiere `AgentManagerExample.cs`, `ProjectManagerUI.cs` und `BackendClient.cs` nach `Assets/Scripts/`.
-2. Lege in der Szene ein leeres GameObject an, z.B. `AgentManager`, und hänge **`AgentManagerExample`** daran.
-3. Erstelle eine Canvas‑UI (Buttons/Textfelder) und hänge **`ProjectManagerUI`** an ein UI‑GameObject.
-4. Verbinde im Inspector:
-   - Im `ProjectManagerUI`‑Script die Referenz auf `AgentManagerExample`.
-   - Im `AgentManagerExample`‑Script die Referenz auf `BackendClient` (wird im Script erzeugt oder per Inspector gesetzt).
-5. Backend starten und im Play‑Modus `Setup` auslösen → Agenten werden gespawnt und sind über die UI ansprechbar.
+#### A) Projekte/Agenten/Wissen im Unity‑Editor pflegen (`ProjectManagerUI.cs`)
+1. Kopiere `ProjectManagerUI.cs` nach `Assets/Scripts/` (oder `Assets/Editor/`).
+2. Backend starten.
+3. In Unity den Menüpunkt **Tools → Project Manager** öffnen.
+4. Projekte, Agenten und Wissenseinträge im Editor anlegen/ändern, bevor du in den Play‑Modus gehst.
 
 #### B) Spawnpoints aus der Szene exportieren (`AgentSpawnPoint.cs` + `RoomPlanExporter.cs`)
 1. Platziere leere GameObjects als Spawnpoints in deiner Szene.
