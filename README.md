@@ -139,6 +139,50 @@ Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
 - `Room Plan Path` / `Agents Path`: Pfade, die der Server kennt (Standard nutzt die Beispiel‑Dateien aus diesem Repo).
 - `Spawn Area`: Bereich, in dem die Boxen zufällig platziert werden.
 
+**QuickAgentManager: alle Einstellungen & Auswirkungen**
+
+**Backend**
+- **Backend Base Url**: Ziel-URL des Backends für `/setup`, `/projects`, `/chat`. Muss erreichbar sein.
+- **Room Plan Path**: Pfad zum Room-Plan JSON (nur genutzt, wenn „Pfade“ gewählt ist).
+- **Agents Path**: Pfad zur Agenten-JSON (nur genutzt, wenn „Pfade“ gewählt ist).
+
+**Spawn**
+- **Spawn Area**: Größe der Spawn-Box (X/Z) für zufällige Platzierung der Agentenwürfel; größere Werte verteilen die Agenten weiter.
+- **Spawn Height**: Y-Position der Würfel.
+- **Box Scale Range**: Zufälliger Größenbereich der Würfel (min/max).
+
+**UI**
+- **Show Ui**: Ein-/Ausblenden des Ingame-UI.
+- **Ui Rect**: Position/Größe des UI-Containers (Screen-Koordinaten).
+
+**Agent Visuals**
+- **Active Agent Color**: Highlight-Farbe für den aktuell aktiven Agenten.
+- **Active Agent Emission**: Emissionsstärke für den aktiven Agenten (falls Material Emission unterstützt).
+- **Bubble Height**: Höhe der Chat-Bubbles über dem Agenten.
+- **Bubble Duration**: Wie lange eine Bubble sichtbar bleibt.
+- **Bubble Stagger**: Verzögerung zwischen mehreren Bubbles.
+- **Handoff Delay**: Wartezeit zwischen Handoff-Hinweis und eigentlicher Antwort.
+- **Handoff Indicator Duration**: Dauer des Handoff-Indikators (Bubble + Linie).
+- **Handoff Line Width**: Linienbreite der Übergabe-Linie.
+
+**Camera Movement**
+- **Enable Free Movement**: Aktiviert freie Kamera (WASD/QE + rechte Maustaste).
+- **Camera Move Speed**: Grundgeschwindigkeit der Kamera.
+- **Camera Boost Multiplier**: Multiplikator bei gedrückter Shift-Taste.
+- **Camera Look Speed**: Maus-Geschwindigkeit für Blickbewegung.
+- **Camera Look Clamp**: Max. Pitch-Winkel (nach oben/unten).
+
+**Runtime (nur Play-Mode)**
+- **Session Id**: Aktuelle Session vom Backend; wird nach Setup gesetzt.
+- **Active Agent Id**: Der ausgewählte Agent, an den Chats gesendet werden.
+
+**UI-Workflow im Play-Modus**
+- **Projekt/Pfade umschalten**: „Projekt“ nutzt die Projektliste aus `GET /projects`; „Pfade“ nutzt die Inspector-Pfade.
+- **Projektliste laden**: Holt die Projekte vom Backend und aktualisiert die Auswahl.
+- **Setup erneut vom Server**: Startet `POST /setup` (mit Projekt oder Pfaden).
+- **Agenten wählen**: Setzt den aktiven Agenten (auch per Linksklick auf Box).
+- **Chat senden**: Sendet `POST /chat` an den aktiven Agenten.
+
 ### Nutzung der zusätzlichen Skripte
 Die folgenden Schritte zeigen, wie du die **neuen Skripte** in ein bestehendes Unity‑Projekt einbaust:
 
@@ -147,6 +191,44 @@ Die folgenden Schritte zeigen, wie du die **neuen Skripte** in ein bestehendes U
 2. Backend starten.
 3. In Unity den Menüpunkt **Tools → Project Manager** öffnen.
 4. Projekte, Agenten und Wissenseinträge im Editor anlegen/ändern, bevor du in den Play‑Modus gehst.
+
+**Projekt-Manager Felder (genaue Bedeutung & Ausfüllhilfe)**
+- **Backend Base Url**: Basis-URL des Python-Backends (z. B. `http://127.0.0.1:8787`). Muss erreichbar sein, sonst schlagen alle Requests fehl.
+- **Projekte aktualisieren**: Lädt die Projektliste via `GET /projects`.
+
+**Neues Projekt**
+- **Name**: Anzeigename des Projekts (Pflicht). Wird im Editor und in der Projektliste verwendet.
+- **ID (optional)**: Eindeutiger technischer Identifier. Leer lassen, um die ID vom Backend erzeugen zu lassen.
+- **Beschreibung**: Freitext zur Dokumentation (optional).
+- **Projekt erstellen**: Sendet die Felder an `POST /projects/create`.
+
+**Vorhandene Projekte**
+- **Laden**: Lädt ein Projekt samt Agenten und Wissen via `GET /projects/{project_id}`.
+
+**Aktuelles Projekt**
+- **Projektname**: Anzeigename des geladenen Projekts. Änderungen wirken sich auf die Projektliste aus.
+- **Beschreibung**: Freitext zum Projekt.
+- **Metadaten speichern**: Speichert Name/Beschreibung via `POST /projects/{project_id}/metadata`.
+
+**Agenten**
+- **Agent hinzufügen**: Legt einen neuen Agenten in der Liste an (erst nach „Agenten speichern“ im Backend).
+- **ID**: Eindeutiger Agent-Identifier. Muss innerhalb des Projekts eindeutig sein (z. B. `agent_sales`).
+- **Name**: Anzeigename im UI/Debug (z. B. „Sven“).
+- **Persona**: Rollen-/Charakterbeschreibung für das Modell. Hier stehen Tonalität, Aufgabe und Regeln des Agenten.
+- **Expertise (CSV)**: Liste von Schlagworten, kommasepariert (z. B. `Preise, Rabatte`). Dient als interne Beschreibung der Kompetenzen.
+- **Wissen-Tags (CSV)**: Liste von Tags, die auf lokale Wissensordner referenzieren (z. B. `pricing, tech`). Muss zu `kb/<tag>/...` passen.
+- **Bevorzugte Zonen (CSV)**: IDs von Zonen/Areas, die beim Spawn bevorzugt werden (wenn das Room-Plan Zonen definiert).
+- **Bevorzugte Spawn-Tags (CSV)**: Tags von Spawnpoints/Zonen, die bevorzugt werden (nur wirksam, wenn im Room-Plan/Spawnpoints Tags vorhanden sind).
+- **Agenten speichern**: Schreibt die gesamte Agentenliste via `POST /projects/{project_id}/agents`.
+
+**Wissensdatenbank**
+- **Tag**: Ordner-Schlüssel der Wissensgruppe (z. B. `pricing`). Entspricht `kb/<tag>/...`.
+- **Name**: Dateiname/Identifier innerhalb des Tags (z. B. `preisliste`). Zusammen mit Tag wird daraus der Wissenseintrag.
+- **Text**: Inhalt des Wissenseintrags als reiner Text/Markdown.
+- **Wissen speichern**: Speichert/überschreibt den Eintrag via `POST /projects/{project_id}/knowledge` (action `upsert`).
+- **Felder leeren**: Leert die Eingabefelder.
+- **Vorhandenes Wissen → Laden**: Lädt den Text eines Eintrags via `POST /projects/{project_id}/knowledge/read`.
+- **Vorhandenes Wissen → Löschen**: Löscht den Eintrag via `POST /projects/{project_id}/knowledge` (action `delete`).
 
 #### B) Spawnpoints aus der Szene exportieren (`AgentSpawnPoint.cs` + `RoomPlanExporter.cs`)
 1. Platziere leere GameObjects als Spawnpoints in deiner Szene.
