@@ -3,6 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 using UnityEngine.Networking;
 
 public class QuickAgentManager : MonoBehaviour
@@ -104,9 +107,9 @@ public class QuickAgentManager : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetMouseButtonDown(0))
+        if (TryGetSelectPosition(out var screenPosition))
         {
-            TrySelectAgentFromClick();
+            TrySelectAgentFromClick(screenPosition);
         }
     }
 
@@ -206,7 +209,27 @@ public class QuickAgentManager : MonoBehaviour
         }
     }
 
-    private void TrySelectAgentFromClick()
+    private bool TryGetSelectPosition(out Vector2 screenPosition)
+    {
+#if ENABLE_INPUT_SYSTEM
+        if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
+        {
+            screenPosition = Mouse.current.position.ReadValue();
+            return true;
+        }
+#elif ENABLE_LEGACY_INPUT_MANAGER
+        if (Input.GetMouseButtonDown(0))
+        {
+            screenPosition = Input.mousePosition;
+            return true;
+        }
+#endif
+
+        screenPosition = default;
+        return false;
+    }
+
+    private void TrySelectAgentFromClick(Vector2 screenPosition)
     {
         var cam = Camera.main;
         if (cam == null)
@@ -214,7 +237,7 @@ public class QuickAgentManager : MonoBehaviour
             return;
         }
 
-        var ray = cam.ScreenPointToRay(Input.mousePosition);
+        var ray = cam.ScreenPointToRay(screenPosition);
         if (Physics.Raycast(ray, out var hit))
         {
             foreach (var pair in agentObjects)
@@ -270,13 +293,28 @@ public class QuickAgentManager : MonoBehaviour
             var resp = JsonUtility.FromJson<ChatResponse>(req.downloadHandler.text);
             sessionId = resp.session_id;
             activeAgentId = resp.active_agent_id;
-            if (resp.events != null)
+            AppendChatEvents(resp.events);
+        }
+    }
+
+    private void AppendChatEvents(ChatEvent[] events)
+    {
+        if (events == null)
+        {
+            return;
+        }
+
+        foreach (var ev in events)
+        {
+            var agentLabel = string.IsNullOrWhiteSpace(ev.agent_id) ? "System" : ev.agent_id;
+            if (!string.IsNullOrWhiteSpace(ev.type))
             {
-                foreach (var ev in resp.events)
-                {
-                    chatLog.Add($"[{ev.agent_id}] {ev.text}");
-                }
+                agentLabel = $"{agentLabel}/{ev.type}";
             }
+
+            var text = ev.text ?? "";
+            text = text.Replace("\\n", "\n");
+            chatLog.Add($"[{agentLabel}] {text}");
         }
     }
 
@@ -330,6 +368,10 @@ public class QuickAgentManager : MonoBehaviour
                 chatInput = "";
                 StartCoroutine(SendChat(toSend));
             }
+        }
+        if (GUILayout.Button("Chat leeren"))
+        {
+            chatLog.Clear();
         }
 
         chatScroll = GUILayout.BeginScrollView(chatScroll, GUILayout.Height(160));
