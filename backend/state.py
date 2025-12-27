@@ -93,6 +93,8 @@ class SessionStore:
     model: str
     temperature: float
     openai: OpenAIResponsesClient
+    default_room_plan_path: str = "examples/room_plan.example.json"
+    default_agents_path: str = "examples/agents.example.json"
     sessions: Dict[str, SessionState] = field(default_factory=dict)
 
     def _project_root(self) -> Path:
@@ -136,16 +138,23 @@ class SessionStore:
         - direct: {"room_plan": {...}, "agents": [{"..."}]}
         - via paths: {"room_plan_path": "examples/room_plan.example.json", "agents_path": "examples/agents.example.json"}
         """
-        if "room_plan_path" in payload:
-            room_plan = self._load_json_file(str(payload["room_plan_path"]))
+        room_plan_path = payload.get("room_plan_path")
+        if room_plan_path:
+            room_plan = self._load_json_file(str(room_plan_path))
         else:
             room_plan = payload.get("room_plan") or {}
+            if not room_plan:
+                room_plan = self._load_json_file(self.default_room_plan_path)
 
-        if "agents_path" in payload:
-            agents_doc = self._load_json_file(str(payload["agents_path"]))
+        agents_path = payload.get("agents_path")
+        if agents_path:
+            agents_doc = self._load_json_file(str(agents_path))
             agent_dicts = agents_doc.get("agents") or []
         else:
             agent_dicts = payload.get("agents") or payload.get("agent_specs") or []
+            if not agent_dicts:
+                agents_doc = self._load_json_file(self.default_agents_path)
+                agent_dicts = agents_doc.get("agents") or []
 
         session_id = payload.get("session_id")
         st = self.create_session(room_plan=room_plan, agent_dicts=agent_dicts, session_id=session_id)
