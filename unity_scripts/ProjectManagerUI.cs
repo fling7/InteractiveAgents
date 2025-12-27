@@ -142,16 +142,25 @@ public class ProjectManagerUI : EditorWindow
             while (routineStack.Count > 0)
             {
                 var current = routineStack.Peek();
-                if (current.MoveNext())
+                if (!current.MoveNext())
                 {
-                    if (current.Current is IEnumerator nested)
-                    {
-                        routineStack.Push(nested);
-                        continue;
-                    }
+                    routineStack.Pop();
+                    continue;
+                }
+
+                if (current.Current is IEnumerator nested)
+                {
+                    routineStack.Push(nested);
                     return true;
                 }
-                routineStack.Pop();
+
+                if (current.Current is AsyncOperation asyncOp)
+                {
+                    routineStack.Push(WaitForAsync(asyncOp));
+                    return true;
+                }
+
+                return true;
             }
             return false;
         }
@@ -406,6 +415,25 @@ public class ProjectManagerUI : EditorWindow
         }
     }
 
+    private void LogResponse(string action, UnityWebRequest req)
+    {
+        var body = req.downloadHandler != null ? req.downloadHandler.text : "";
+        Debug.Log($"[ProjectManagerUI] <- {action} (HTTP {req.responseCode}) {body}");
+    }
+
+    private static IEnumerator WaitForAsync(AsyncOperation asyncOp)
+    {
+        if (asyncOp == null)
+        {
+            yield break;
+        }
+
+        while (!asyncOp.isDone)
+        {
+            yield return null;
+        }
+    }
+
     private IEnumerator RefreshProjects()
     {
         LogStep("Projekte laden", "GET /projects");
@@ -420,6 +448,7 @@ public class ProjectManagerUI : EditorWindow
                 LogStatus("Fehler beim Laden der Projekte: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
+            LogResponse("GET /projects", req);
             var resp = JsonUtility.FromJson<ProjectListResponse>(req.downloadHandler.text);
             projects = resp?.projects ?? Array.Empty<ProjectSummary>();
             LogStatus("Projekte geladen: " + projects.Length);
@@ -467,6 +496,7 @@ public class ProjectManagerUI : EditorWindow
                 LogStatus("Fehler beim Laden des Projekts: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
+            LogResponse($"GET /projects/{projectId}", req);
             var resp = JsonUtility.FromJson<ProjectDetailResponse>(req.downloadHandler.text);
             if (resp == null || resp.project == null)
             {
@@ -610,6 +640,7 @@ public class ProjectManagerUI : EditorWindow
                 LogStatus("Fehler: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
+            LogResponse($"POST /projects/{currentProject.id}/knowledge/read", req);
             var resp = JsonUtility.FromJson<KnowledgeReadResponse>(req.downloadHandler.text);
             if (resp != null)
             {
@@ -639,6 +670,7 @@ public class ProjectManagerUI : EditorWindow
                 LogStatus("Fehler beim Laden der Wissensliste: " + req.error + " | " + req.downloadHandler.text);
                 yield break;
             }
+            LogResponse($"GET /projects/{currentProject.id}/knowledge", req);
             var resp = JsonUtility.FromJson<KnowledgeListResponse>(req.downloadHandler.text);
             knowledgeEntries = resp?.knowledge ?? Array.Empty<KnowledgeEntrySummary>();
             LogStatus("Wissen aktualisiert.");
@@ -660,6 +692,7 @@ public class ProjectManagerUI : EditorWindow
             }
             else
             {
+                LogResponse(actionLabel ?? "POST", req);
                 if (!string.IsNullOrEmpty(actionLabel))
                 {
                     LogStatus($"{actionLabel} abgeschlossen.");
