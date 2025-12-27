@@ -47,6 +47,23 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
 
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
+            if path == "/":
+                return _json_response(
+                    self,
+                    200,
+                    {
+                        "message": "Backend läuft.",
+                        "endpoints": {
+                            "GET /health": "Status-Check",
+                            "POST /setup": "Session/Agenten Setup",
+                            "POST /chat": "Chat mit Agent",
+                        },
+                        "examples": {
+                            "room_plan_path": "examples/room_plan.example.json",
+                            "agents_path": "examples/agents.example.json",
+                        },
+                    },
+                )
             if path == "/health":
                 return _json_response(self, 200, {"status": "ok"})
             return _json_response(self, 404, {"error": "Not found", "path": path})
