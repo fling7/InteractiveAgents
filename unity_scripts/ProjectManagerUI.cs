@@ -44,6 +44,9 @@ public class ProjectManagerUI : EditorWindow
         public string[] knowledge_tags;
         public string[] preferred_zone_ids;
         public string[] preferred_spawn_tags;
+        public string voice;
+        public string voice_style;
+        public string tts_model;
     }
 
     [Serializable]
@@ -123,6 +126,10 @@ public class ProjectManagerUI : EditorWindow
         public string knowledgeTagsCsv;
         public string preferredZoneIdsCsv;
         public string preferredSpawnTagsCsv;
+        public string voice;
+        public string voiceStyle;
+        public string ttsModel;
+        public string voiceGender;
     }
 
     private class EditorCoroutine
@@ -187,6 +194,11 @@ public class ProjectManagerUI : EditorWindow
     private string knowledgeTag = "";
     private string knowledgeName = "";
     private string knowledgeText = "";
+    private readonly string[] voiceGenderOptions = { "weiblich", "männlich" };
+    private readonly string[] femaleVoices = { "coral", "nova", "shimmer" };
+    private readonly string[] maleVoices = { "alloy", "verse", "onyx", "fable", "echo" };
+    private readonly string[] voiceStyleOptions = { "klar", "kreativ", "präzise", "warm", "neutral" };
+    private readonly string[] ttsModelOptions = { "gpt-4o-mini-tts", "tts-1", "tts-1-hd" };
 
     [MenuItem("Tools/Project Manager")]
     public static void OpenWindow()
@@ -275,6 +287,10 @@ public class ProjectManagerUI : EditorWindow
                     knowledgeTagsCsv = "",
                     preferredZoneIdsCsv = "",
                     preferredSpawnTagsCsv = "",
+                    voice = "",
+                    voiceStyle = "",
+                    ttsModel = "",
+                    voiceGender = voiceGenderOptions[0],
                 });
             }
 
@@ -301,6 +317,12 @@ public class ProjectManagerUI : EditorWindow
                 agent.knowledgeTagsCsv = LabeledTextField("Wissen-Tags (CSV)", agent.knowledgeTagsCsv);
                 agent.preferredZoneIdsCsv = LabeledTextField("Bevorzugte Zonen (CSV)", agent.preferredZoneIdsCsv);
                 agent.preferredSpawnTagsCsv = LabeledTextField("Bevorzugte Spawn-Tags (CSV)", agent.preferredSpawnTagsCsv);
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField("Stimme (TTS)", EditorStyles.boldLabel);
+                DrawVoiceOptions(agent);
+                agent.voice = LabeledTextField("Voice", agent.voice);
+                agent.voiceStyle = LabeledTextField("Voice Style", agent.voiceStyle);
+                agent.ttsModel = LabeledTextField("TTS Model", agent.ttsModel);
                 EditorGUILayout.EndVertical();
             }
 
@@ -395,6 +417,79 @@ public class ProjectManagerUI : EditorWindow
         value = EditorGUILayout.TextField(value ?? "");
         EditorGUILayout.EndHorizontal();
         return value;
+    }
+
+    private void DrawVoiceOptions(AgentUi agent)
+    {
+        if (agent == null)
+        {
+            return;
+        }
+
+        var genderIndex = agent.voiceGender == voiceGenderOptions[1] ? 1 : 0;
+        var updatedGender = GUILayout.Toolbar(genderIndex, voiceGenderOptions);
+        if (updatedGender != genderIndex)
+        {
+            agent.voiceGender = voiceGenderOptions[updatedGender];
+        }
+
+        var voiceOptions = agent.voiceGender == voiceGenderOptions[1] ? maleVoices : femaleVoices;
+        DrawOptionButtons("Stimme", voiceOptions, agent.voice, selected => agent.voice = selected);
+        DrawOptionButtons("Stil", voiceStyleOptions, agent.voiceStyle, selected => agent.voiceStyle = selected);
+        DrawOptionButtons("TTS-Modell", ttsModelOptions, agent.ttsModel, selected => agent.ttsModel = selected);
+    }
+
+    private static void DrawOptionButtons(string label, string[] options, string currentValue, Action<string> onSelected)
+    {
+        EditorGUILayout.LabelField(label + ":");
+        const int buttonsPerRow = 3;
+        for (var i = 0; i < options.Length; i += buttonsPerRow)
+        {
+            EditorGUILayout.BeginHorizontal();
+            for (var j = 0; j < buttonsPerRow && i + j < options.Length; j++)
+            {
+                var option = options[i + j];
+                var previousColor = GUI.backgroundColor;
+                if (!string.IsNullOrWhiteSpace(currentValue) && option == currentValue)
+                {
+                    GUI.backgroundColor = new Color(0.35f, 0.7f, 1f, 1f);
+                }
+
+                if (GUILayout.Button(option))
+                {
+                    onSelected?.Invoke(option);
+                }
+
+                GUI.backgroundColor = previousColor;
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+    }
+
+    private string ResolveGenderForVoice(string voice)
+    {
+        if (string.IsNullOrWhiteSpace(voice))
+        {
+            return null;
+        }
+
+        for (var i = 0; i < femaleVoices.Length; i++)
+        {
+            if (voice == femaleVoices[i])
+            {
+                return voiceGenderOptions[0];
+            }
+        }
+
+        for (var i = 0; i < maleVoices.Length; i++)
+        {
+            if (voice == maleVoices[i])
+            {
+                return voiceGenderOptions[1];
+            }
+        }
+
+        return null;
     }
 
     private void LogStatus(string message)
@@ -524,6 +619,10 @@ public class ProjectManagerUI : EditorWindow
                 knowledgeTagsCsv = JoinCsv(agent.knowledge_tags),
                 preferredZoneIdsCsv = JoinCsv(agent.preferred_zone_ids),
                 preferredSpawnTagsCsv = JoinCsv(agent.preferred_spawn_tags),
+                voice = agent.voice ?? "",
+                voiceStyle = agent.voice_style ?? "",
+                ttsModel = agent.tts_model ?? "",
+                voiceGender = ResolveGenderForVoice(agent.voice) ?? voiceGenderOptions[0],
             });
         }
     }
@@ -570,6 +669,9 @@ public class ProjectManagerUI : EditorWindow
                 knowledge_tags = ParseCsv(agent.knowledgeTagsCsv),
                 preferred_zone_ids = ParseCsv(agent.preferredZoneIdsCsv),
                 preferred_spawn_tags = ParseCsv(agent.preferredSpawnTagsCsv),
+                voice = agent.voice,
+                voice_style = agent.voiceStyle,
+                tts_model = agent.ttsModel,
             });
         }
         var payload = new AgentsSaveRequest { agents = agents.ToArray() };
