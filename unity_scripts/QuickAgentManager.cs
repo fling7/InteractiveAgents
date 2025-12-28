@@ -160,7 +160,6 @@ public class QuickAgentManager : MonoBehaviour
         public string voice;
         public string voiceStyle;
         public string ttsModel;
-        public string gender;
     }
 
     private readonly Dictionary<string, AgentVisual> agentObjects = new Dictionary<string, AgentVisual>();
@@ -192,11 +191,6 @@ public class QuickAgentManager : MonoBehaviour
     private float cameraYaw;
     private float cameraPitch;
     private bool cameraInitialized;
-    private readonly string[] voiceGenderOptions = { "weiblich", "männlich" };
-    private readonly string[] femaleVoices = { "coral", "nova", "shimmer" };
-    private readonly string[] maleVoices = { "alloy", "verse", "onyx", "fable", "echo" };
-    private readonly string[] voiceStyleOptions = { "klar", "kreativ", "präzise", "warm", "neutral" };
-    private readonly string[] ttsModelOptions = { "gpt-4o-mini-tts", "tts-1", "tts-1-hd" };
 
     private void Start()
     {
@@ -352,8 +346,7 @@ public class QuickAgentManager : MonoBehaviour
             {
                 voice = agent.voice,
                 voiceStyle = agent.voice_style,
-                ttsModel = agent.tts_model,
-                gender = ResolveGenderForVoice(agent.voice)
+                ttsModel = agent.tts_model
             };
         }
     }
@@ -751,9 +744,6 @@ public class QuickAgentManager : MonoBehaviour
         GUILayout.EndScrollView();
 
         GUILayout.Space(6);
-        DrawVoiceSettingsUi();
-
-        GUILayout.Space(6);
         GUILayout.Label("Chat:");
         GUI.SetNextControlName(ChatInputControlName);
         chatInput = GUILayout.TextField(chatInput);
@@ -787,178 +777,6 @@ public class QuickAgentManager : MonoBehaviour
         GUILayout.Label("Freie Kamera: WASD + QE, rechte Maustaste zum Umschauen.");
         GUILayout.EndScrollView();
         GUILayout.EndArea();
-    }
-
-    private void DrawVoiceSettingsUi()
-    {
-        GUILayout.Label("Stimme (TTS):");
-        if (string.IsNullOrWhiteSpace(activeAgentId))
-        {
-            GUILayout.Label("Bitte zuerst einen Agenten auswählen.");
-            return;
-        }
-
-        var settings = GetOrCreateVoiceSettings(activeAgentId);
-        var previousVoice = settings.voice;
-        var previousStyle = settings.voiceStyle;
-        var previousModel = settings.ttsModel;
-        var previousGender = settings.gender;
-
-        GUILayout.BeginVertical("box");
-
-        var genderIndex = settings.gender == voiceGenderOptions[1] ? 1 : 0;
-        var selectedGenderIndex = GUILayout.Toolbar(genderIndex, voiceGenderOptions);
-        if (selectedGenderIndex != genderIndex)
-        {
-            settings.gender = voiceGenderOptions[selectedGenderIndex];
-        }
-
-        var voiceOptions = settings.gender == voiceGenderOptions[1] ? maleVoices : femaleVoices;
-        DrawOptionButtons("Stimme", voiceOptions, settings.voice, selected =>
-        {
-            settings.voice = selected;
-        });
-
-        DrawOptionButtons("Stil", voiceStyleOptions, settings.voiceStyle, selected =>
-        {
-            settings.voiceStyle = selected;
-        });
-
-        DrawOptionButtons("TTS-Modell", ttsModelOptions, settings.ttsModel, selected =>
-        {
-            settings.ttsModel = selected;
-        });
-
-        DrawEditableField("Voice", ref settings.voice);
-        DrawEditableField("Voice Style", ref settings.voiceStyle);
-        DrawEditableField("TTS Model", ref settings.ttsModel);
-
-        GUILayout.EndVertical();
-
-        if (!string.Equals(previousVoice, settings.voice)
-            || !string.Equals(previousStyle, settings.voiceStyle)
-            || !string.Equals(previousModel, settings.ttsModel)
-            || !string.Equals(previousGender, settings.gender))
-        {
-            ClearAgentTtsCache(activeAgentId);
-        }
-    }
-
-    private void DrawOptionButtons(string label, string[] options, string currentValue, Action<string> onSelected)
-    {
-        GUILayout.Label(label + ":");
-        const int buttonsPerRow = 3;
-        for (var i = 0; i < options.Length; i += buttonsPerRow)
-        {
-            GUILayout.BeginHorizontal();
-            for (var j = 0; j < buttonsPerRow && i + j < options.Length; j++)
-            {
-                var option = options[i + j];
-                var previousColor = GUI.backgroundColor;
-                if (!string.IsNullOrWhiteSpace(currentValue) && option == currentValue)
-                {
-                    GUI.backgroundColor = new Color(0.35f, 0.7f, 1f, 1f);
-                }
-
-                if (GUILayout.Button(option))
-                {
-                    onSelected(option);
-                }
-
-                GUI.backgroundColor = previousColor;
-            }
-            GUILayout.EndHorizontal();
-        }
-    }
-
-    private void DrawEditableField(string label, ref string value)
-    {
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(label, GUILayout.Width(100f));
-        value = GUILayout.TextField(value ?? "");
-        GUILayout.EndHorizontal();
-    }
-
-    private AgentVoiceSettings GetOrCreateVoiceSettings(string agentId)
-    {
-        if (string.IsNullOrWhiteSpace(agentId))
-        {
-            return new AgentVoiceSettings
-            {
-                voice = null,
-                voiceStyle = null,
-                ttsModel = null,
-                gender = voiceGenderOptions[0]
-            };
-        }
-
-        if (!agentVoices.TryGetValue(agentId, out var settings) || settings == null)
-        {
-            settings = new AgentVoiceSettings
-            {
-                voice = null,
-                voiceStyle = null,
-                ttsModel = null,
-                gender = voiceGenderOptions[0]
-            };
-            agentVoices[agentId] = settings;
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.gender))
-        {
-            settings.gender = ResolveGenderForVoice(settings.voice) ?? voiceGenderOptions[0];
-        }
-
-        return settings;
-    }
-
-    private string ResolveGenderForVoice(string voice)
-    {
-        if (string.IsNullOrWhiteSpace(voice))
-        {
-            return null;
-        }
-
-        for (var i = 0; i < femaleVoices.Length; i++)
-        {
-            if (voice == femaleVoices[i])
-            {
-                return voiceGenderOptions[0];
-            }
-        }
-
-        for (var i = 0; i < maleVoices.Length; i++)
-        {
-            if (voice == maleVoices[i])
-            {
-                return voiceGenderOptions[1];
-            }
-        }
-
-        return null;
-    }
-
-    private void ClearAgentTtsCache(string agentId)
-    {
-        if (string.IsNullOrWhiteSpace(agentId))
-        {
-            return;
-        }
-
-        var prefix = $"{agentId}::";
-        var toRemove = new List<string>();
-        foreach (var entry in ttsCache)
-        {
-            if (entry.Key.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                toRemove.Add(entry.Key);
-            }
-        }
-
-        for (var i = 0; i < toRemove.Count; i++)
-        {
-            ttsCache.Remove(toRemove[i]);
-        }
     }
 
     private void SetActiveAgentId(string id, bool updateStatus = false)
