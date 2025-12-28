@@ -24,7 +24,10 @@
       "preferred_spawn_tags": [
         "pricing",
         "sales"
-      ]
+      ],
+      "voice": "alloy",
+      "voice_style": "klar",
+      "tts_model": "gpt-4o-mini-tts"
     },
     {
       "id": "agent_marketing",
@@ -48,7 +51,10 @@
       ],
       "preferred_spawn_tags": [
         "welcome"
-      ]
+      ],
+      "voice": "verse",
+      "voice_style": "kreativ",
+      "tts_model": "gpt-4o-mini-tts"
     },
     {
       "id": "agent_tech",
@@ -74,7 +80,10 @@
       "preferred_spawn_tags": [
         "demo",
         "tech"
-      ]
+      ],
+      "voice": "coral",
+      "voice_style": "präzise",
+      "tts_model": "gpt-4o-mini-tts"
     }
   ]
 }

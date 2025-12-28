@@ -35,6 +35,10 @@ public class QuickAgentManager : MonoBehaviour
     public float handoffIndicatorDuration = 5f;
     public float handoffLineWidth = 0.06f;
 
+    [Header("TTS")]
+    public bool enableTts = true;
+    public float ttsCooldownSeconds = 0.5f;
+
     [Header("Camera Movement")]
     public bool enableFreeMovement = true;
     public float cameraMoveSpeed = 4f;
@@ -73,6 +77,9 @@ public class QuickAgentManager : MonoBehaviour
     {
         public string id;
         public string display_name;
+        public string voice;
+        public string voice_style;
+        public string tts_model;
         public Vector3Data position;
         public Vector3Data forward;
         public string spawn_point_id;
@@ -120,6 +127,15 @@ public class QuickAgentManager : MonoBehaviour
         public ChatEvent[] events;
     }
 
+    [Serializable]
+    public class TtsRequest
+    {
+        public string text;
+        public string voice;
+        public string voice_style;
+        public string tts_model;
+    }
+
     [Header("Runtime")]
     public string sessionId;
     public string activeAgentId;
@@ -130,6 +146,7 @@ public class QuickAgentManager : MonoBehaviour
         public Renderer renderer;
         public Color baseColor;
         public float scale;
+        public AudioSource audioSource;
     }
 
     private class BubbleInfo
@@ -138,8 +155,19 @@ public class QuickAgentManager : MonoBehaviour
         public float expiresAt;
     }
 
+    private class AgentVoiceSettings
+    {
+        public string voice;
+        public string voiceStyle;
+        public string ttsModel;
+    }
+
     private readonly Dictionary<string, AgentVisual> agentObjects = new Dictionary<string, AgentVisual>();
     private readonly Dictionary<string, BubbleInfo> agentBubbles = new Dictionary<string, BubbleInfo>();
+    private readonly Dictionary<string, AgentVoiceSettings> agentVoices = new Dictionary<string, AgentVoiceSettings>();
+    private readonly Dictionary<string, AudioClip> ttsCache = new Dictionary<string, AudioClip>();
+    private readonly HashSet<string> ttsInFlight = new HashSet<string>();
+    private readonly Dictionary<string, float> ttsLastRequest = new Dictionary<string, float>();
     private readonly List<string> chatLog = new List<string>();
     private AgentPlacement[] lastAgents;
     private string statusMessage = "";
@@ -239,6 +267,7 @@ public class QuickAgentManager : MonoBehaviour
             sessionId = resp.session_id;
             lastAgents = resp.agents ?? Array.Empty<AgentPlacement>();
             statusMessage = $"Setup OK. Agents: {lastAgents.Length}";
+            UpdateAgentVoices(lastAgents);
             SpawnAgents(lastAgents);
             if (lastAgents.Length > 0)
             {
@@ -298,6 +327,30 @@ public class QuickAgentManager : MonoBehaviour
         selectedProjectId = projects[0].id;
     }
 
+    private void UpdateAgentVoices(AgentPlacement[] agents)
+    {
+        agentVoices.Clear();
+        if (agents == null)
+        {
+            return;
+        }
+
+        foreach (var agent in agents)
+        {
+            if (string.IsNullOrWhiteSpace(agent.id))
+            {
+                continue;
+            }
+
+            agentVoices[agent.id] = new AgentVoiceSettings
+            {
+                voice = agent.voice,
+                voiceStyle = agent.voice_style,
+                ttsModel = agent.tts_model
+            };
+        }
+    }
+
     private void SpawnAgents(AgentPlacement[] agents)
     {
         foreach (var entry in agentObjects)
@@ -335,12 +388,16 @@ public class QuickAgentManager : MonoBehaviour
                 renderer.material.color = baseColor;
             }
 
+            var audioSource = cube.AddComponent<AudioSource>();
+            audioSource.playOnAwake = false;
+
             agentObjects[id] = new AgentVisual
             {
                 obj = cube,
                 renderer = renderer,
                 baseColor = baseColor,
-                scale = scale
+                scale = scale,
+                audioSource = audioSource
             };
         }
 
@@ -807,6 +864,7 @@ public class QuickAgentManager : MonoBehaviour
             }
 
             SetBubble(ev.agent_id, text, bubbleDuration);
+            StartCoroutine(PlayAgentSpeech(ev.agent_id, text));
             yield return new WaitForSeconds(bubbleStagger);
         }
     }
@@ -995,6 +1053,127 @@ public class QuickAgentManager : MonoBehaviour
         var toPos = toVisual.obj.transform.position + Vector3.up * (toVisual.scale * 0.6f);
         handoffLine.SetPosition(0, fromPos);
         handoffLine.SetPosition(1, toPos);
+    }
+
+    private AgentVoiceSettings GetAgentVoiceSettings(string agentId)
+    {
+        if (!string.IsNullOrWhiteSpace(agentId) && agentVoices.TryGetValue(agentId, out var settings))
+        {
+            return settings;
+        }
+
+        return new AgentVoiceSettings
+        {
+            voice = null,
+            voiceStyle = null,
+            ttsModel = null
+        };
+    }
+
+    private bool IsTtsRateLimited(string agentId)
+    {
+        if (ttsCooldownSeconds <= 0f || string.IsNullOrWhiteSpace(agentId))
+        {
+            return false;
+        }
+
+        if (ttsLastRequest.TryGetValue(agentId, out var lastTime))
+        {
+            return Time.time - lastTime < ttsCooldownSeconds;
+        }
+
+        return false;
+    }
+
+    private void RecordTtsRequest(string agentId)
+    {
+        if (string.IsNullOrWhiteSpace(agentId))
+        {
+            return;
+        }
+
+        ttsLastRequest[agentId] = Time.time;
+    }
+
+    private void PlayAgentClip(string agentId, AudioClip clip)
+    {
+        if (clip == null || string.IsNullOrWhiteSpace(agentId))
+        {
+            return;
+        }
+
+        if (agentObjects.TryGetValue(agentId, out var visual) && visual != null && visual.audioSource != null)
+        {
+            visual.audioSource.PlayOneShot(clip);
+        }
+    }
+
+    private IEnumerator PlayAgentSpeech(string agentId, string text)
+    {
+        if (!enableTts || string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(agentId))
+        {
+            yield break;
+        }
+
+        var key = $"{agentId}::{text}";
+        if (ttsCache.TryGetValue(key, out var cachedClip))
+        {
+            PlayAgentClip(agentId, cachedClip);
+            yield break;
+        }
+
+        if (ttsInFlight.Contains(key))
+        {
+            yield break;
+        }
+
+        if (IsTtsRateLimited(agentId))
+        {
+            yield break;
+        }
+
+        ttsInFlight.Add(key);
+        RecordTtsRequest(agentId);
+
+        var voiceSettings = GetAgentVoiceSettings(agentId);
+        var payload = new TtsRequest
+        {
+            text = text,
+            voice = voiceSettings.voice,
+            voice_style = voiceSettings.voiceStyle,
+            tts_model = voiceSettings.ttsModel
+        };
+        var json = JsonUtility.ToJson(payload);
+        var url = $"{backendBaseUrl}/tts";
+
+        using (var req = new UnityWebRequest(url, "POST"))
+        {
+            var body = Encoding.UTF8.GetBytes(json);
+            req.uploadHandler = new UploadHandlerRaw(body);
+            req.downloadHandler = new DownloadHandlerAudioClip(url, AudioType.MPEG);
+            req.SetRequestHeader("Content-Type", "application/json");
+            yield return req.SendWebRequest();
+
+            ttsInFlight.Remove(key);
+
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                statusMessage = "TTS fehlgeschlagen: " + req.error;
+                chatLog.Add(statusMessage + " | " + req.downloadHandler.text);
+                yield break;
+            }
+
+            var clip = DownloadHandlerAudioClip.GetContent(req);
+            if (clip == null)
+            {
+                statusMessage = "TTS fehlgeschlagen: Kein AudioClip.";
+                chatLog.Add(statusMessage);
+                yield break;
+            }
+
+            ttsCache[key] = clip;
+            PlayAgentClip(agentId, clip);
+        }
     }
 
     private void TrySendChatFromInput()

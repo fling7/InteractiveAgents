@@ -31,6 +31,17 @@ def _read_json(handler: BaseHTTPRequestHandler) -> Dict[str, Any]:
     return json.loads(raw)
 
 
+def _binary_response(handler: BaseHTTPRequestHandler, status: int, payload: bytes, content_type: str) -> None:
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
 def start_http_server(host: str, port: int, store: SessionStore) -> None:
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args) -> None:  # noqa: N802
@@ -46,6 +57,10 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
         def _send_json(self, status: int, payload: Dict[str, Any]) -> None:
             print(f"[HTTP] <- {self.command} {self.path} {status}", flush=True)
             _json_response(self, status, payload)
+
+        def _send_binary(self, status: int, payload: bytes, content_type: str) -> None:
+            print(f"[HTTP] <- {self.command} {self.path} {status}", flush=True)
+            _binary_response(self, status, payload, content_type)
 
         def do_OPTIONS(self) -> None:  # noqa: N802
             self._log_request()
@@ -78,6 +93,7 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                                 "GET /projects/{id}/knowledge": "Wissensliste",
                                 "POST /projects/{id}/knowledge": "Wissen erstellen/aktualisieren/löschen",
                                 "POST /projects/{id}/knowledge/read": "Wissen laden",
+                                "POST /tts": "Text-to-Speech erzeugen",
                             },
                             "examples": {
                                 "room_plan_path": "examples/room_plan.example.json",
@@ -125,6 +141,9 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                 if path == "/chat":
                     out = store.chat(payload)
                     return self._send_json(200, out)
+                if path == "/tts":
+                    audio, content_type = store.tts(payload)
+                    return self._send_binary(200, audio, content_type)
                 if path == "/projects/create":
                     display_name = str(payload.get("display_name") or "").strip()
                     if not display_name:

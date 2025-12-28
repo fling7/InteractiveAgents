@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .kb import KnowledgeBase
-from .openai_client import OpenAIHTTPError, OpenAIResponsesClient
+from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_tts_audio
 from .placement import assign_spawn_points
 from .projects import ProjectManager
 from .schemas import npc_action_schema
@@ -35,6 +35,9 @@ class AgentSpec:
     knowledge_tags: List[str] = field(default_factory=list)
     preferred_zone_ids: List[str] = field(default_factory=list)
     preferred_spawn_tags: List[str] = field(default_factory=list)
+    voice: Optional[str] = None
+    voice_style: Optional[str] = None
+    tts_model: Optional[str] = None
 
     @staticmethod
     def from_dict(d: Dict[str, Any], idx: int) -> "AgentSpec":
@@ -56,6 +59,10 @@ class AgentSpec:
         if isinstance(preferred_spawn_tags, str):
             preferred_spawn_tags = [preferred_spawn_tags]
 
+        voice = str(d.get("voice") or "").strip() or None
+        voice_style = str(d.get("voice_style") or "").strip() or None
+        tts_model = str(d.get("tts_model") or "").strip() or None
+
         return AgentSpec(
             id=agent_id,
             display_name=display,
@@ -64,6 +71,9 @@ class AgentSpec:
             knowledge_tags=[str(x) for x in knowledge_tags],
             preferred_zone_ids=[str(x) for x in preferred_zone_ids],
             preferred_spawn_tags=[str(x) for x in preferred_spawn_tags],
+            voice=voice,
+            voice_style=voice_style,
+            tts_model=tts_model,
         )
 
     def short_profile(self) -> str:
@@ -199,6 +209,9 @@ class SessionStore:
                 {
                     "id": agent.id,
                     "display_name": agent.display_name,
+                    "voice": agent.voice,
+                    "voice_style": agent.voice_style,
+                    "tts_model": agent.tts_model,
                     "position": pl.get("position", {"x": 0, "y": 0, "z": 0}),
                     "forward": pl.get("forward", {"x": 0, "y": 0, "z": 1}),
                     "spawn_point_id": pl.get("spawn_point_id"),
@@ -208,6 +221,23 @@ class SessionStore:
             )
 
         return {"session_id": st.session_id, "agents": agents_out}
+
+    def tts(self, payload: Dict[str, Any]) -> Tuple[bytes, str]:
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ValueError("text fehlt.")
+        voice = str(payload.get("voice") or "").strip() or "alloy"
+        tts_model = str(payload.get("tts_model") or "").strip() or "gpt-4o-mini-tts"
+        response_format = str(payload.get("response_format") or "mp3").strip() or "mp3"
+        audio, content_type = create_tts_audio(
+            api_key=self.openai.api_key,
+            text=text,
+            voice=voice,
+            model=tts_model,
+            response_format=response_format,
+            timeout_seconds=self.openai.timeout_seconds,
+        )
+        return audio, content_type
 
     def _get_project_kb(self, project_id: str) -> KnowledgeBase:
         if project_id in self.kb_cache:

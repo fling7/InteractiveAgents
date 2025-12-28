@@ -127,3 +127,45 @@ class OpenAIResponsesClient:
         except json.JSONDecodeError:
             parsed = {"_parse_error": True, "_raw_text": out_text}
         return parsed, resp, out_text
+
+
+def create_tts_audio(
+    *,
+    api_key: str,
+    text: str,
+    voice: str,
+    model: str,
+    response_format: str = "mp3",
+    timeout_seconds: int = 60,
+) -> Tuple[bytes, str]:
+    payload = {
+        "model": model,
+        "voice": voice,
+        "input": text,
+        "response_format": response_format,
+    }
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/audio/speech",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            audio = resp.read()
+            content_type = resp.headers.get("Content-Type", "audio/mpeg")
+            return audio, content_type
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            details = json.loads(raw)
+        except Exception:
+            details = {"raw": raw}
+        raise OpenAIHTTPError(e.code, f"OpenAI HTTP {e.code}", details=details) from e
+    except urllib.error.URLError as e:
+        raise OpenAIHTTPError(0, f"OpenAI connection error: {e}") from e
