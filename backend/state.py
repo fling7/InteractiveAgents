@@ -622,7 +622,7 @@ class SessionStore:
             "aus der MLDSI-Datei als primäre Leitlinie für Rollen, Ton und Expertise. "
             "Gib außerdem für jeden Agenten passende Voice-Settings an: "
             "voice_gender (\"weiblich\" oder \"männlich\"), voice (Stimm-ID passend zum Geschlecht), "
-            "voice_style (z. B. klar, kreativ, präzise, warm, neutral) und tts_model. "
+            "voice_style (z. B. klar, kreativ, präzise, warm, neutral) und tts_model (gpt-4o-mini-tts). "
             "Verwende nach Möglichkeit folgende Stimm-IDs: weiblich = coral, nova, shimmer; "
             "männlich = alloy, verse, onyx, fable, echo. "
             "Gib eine kurze assistant_message, die dem Nutzer die Analyse und evtl. Rückfragen zusammenfasst. "
@@ -716,6 +716,8 @@ class SessionStore:
                 voice_gender = "weiblich" if voice in {"coral", "nova", "shimmer"} else "männlich"
             if not voice_style:
                 voice_style = "neutral"
+            if tts_model.lower() == "standard":
+                tts_model = ""
             if not tts_model:
                 tts_model = "gpt-4o-mini-tts"
             agents.append(
