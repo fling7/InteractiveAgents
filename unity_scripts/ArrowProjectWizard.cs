@@ -214,11 +214,7 @@ public class ArrowProjectWizard : EditorWindow
     private bool isAnalyzing;
     private bool isChatting;
     private bool isCommitting;
-    private bool showPlacementStep;
-    private PlacementSummary[] placementSummaries;
-    private RoomObjectSummary[] roomObjectSummaries;
     private string committedProjectId = "";
-    private Vector2 placementScroll;
 
     [MenuItem("Tools/MLDSI Project Wizard")]
     public static void ShowWindow()
@@ -285,7 +281,6 @@ public class ArrowProjectWizard : EditorWindow
         DrawDraft();
         DrawChat();
         DrawCommitSection();
-        DrawPlacementStep();
 
         EditorGUILayout.EndScrollView();
     }
@@ -365,10 +360,6 @@ public class ArrowProjectWizard : EditorWindow
                 if (agent.knowledge_tags != null && agent.knowledge_tags.Length > 0)
                 {
                     EditorGUILayout.LabelField("Knowledge Tags", string.Join(", ", agent.knowledge_tags), EditorStyles.wordWrappedLabel);
-                }
-                if (!string.IsNullOrEmpty(agent.voice))
-                {
-                    EditorGUILayout.LabelField("Stimme", agent.voice, EditorStyles.wordWrappedLabel);
                 }
                 if (!string.IsNullOrEmpty(agent.voice_gender))
                 {
@@ -464,57 +455,6 @@ public class ArrowProjectWizard : EditorWindow
         }
     }
 
-    private void DrawPlacementStep()
-    {
-        if (!showPlacementStep || placementSummaries == null || placementSummaries.Length == 0)
-        {
-            return;
-        }
-
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Agenten-Platzierung", EditorStyles.boldLabel);
-        if (!string.IsNullOrEmpty(committedProjectId))
-        {
-            EditorGUILayout.LabelField($"Projekt-ID: {committedProjectId}", EditorStyles.wordWrappedLabel);
-        }
-        EditorGUILayout.HelpBox(
-            "Die Agenten wurden anhand der MLDSI und der Agentenrollen platziert. "
-            + "Die Positionen wurden gespeichert und werden im Raum verwendet.",
-            MessageType.Info
-        );
-
-        placementScroll = EditorGUILayout.BeginScrollView(placementScroll, GUILayout.MinHeight(140));
-        foreach (var placement in placementSummaries)
-        {
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField($"{placement.display_name} ({placement.id})", EditorStyles.wordWrappedLabel);
-            if (placement.position != null)
-            {
-                EditorGUILayout.LabelField(
-                    "Position",
-                    $"x={placement.position.x:0.00}, y={placement.position.y:0.00}, z={placement.position.z:0.00}",
-                    EditorStyles.wordWrappedLabel
-                );
-            }
-            if (!string.IsNullOrEmpty(placement.zone_id))
-            {
-                EditorGUILayout.LabelField("Zone", placement.zone_id, EditorStyles.wordWrappedLabel);
-            }
-            if (placement.tags != null && placement.tags.Length > 0)
-            {
-                EditorGUILayout.LabelField("Tags", string.Join(", ", placement.tags), EditorStyles.wordWrappedLabel);
-            }
-            EditorGUILayout.EndVertical();
-        }
-        EditorGUILayout.EndScrollView();
-
-        DrawPlacementPreview(
-            roomObjectSummaries,
-            placementSummaries,
-            "Legende: Blau = Objekt, Orange = Agent"
-        );
-    }
-
     private void ResetState()
     {
         arrowFilePath = "";
@@ -530,9 +470,6 @@ public class ArrowProjectWizard : EditorWindow
         isAnalyzing = false;
         isChatting = false;
         isCommitting = false;
-        showPlacementStep = false;
-        placementSummaries = null;
-        roomObjectSummaries = null;
         committedProjectId = "";
     }
 
@@ -542,7 +479,6 @@ public class ArrowProjectWizard : EditorWindow
         arrowFilePath = fullPath;
         arrowJson = File.ReadAllText(fullPath, Encoding.UTF8);
         statusMessage = "MLDSI geladen.";
-        showPlacementStep = false;
     }
 
     private void StartAnalyze()
@@ -554,7 +490,6 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         statusMessage = "Analyse läuft...";
-        showPlacementStep = false;
         isAnalyzing = true;
         var payload = new AnalyzeRequest { arrow_json = arrowJson };
         var body = JsonUtility.ToJson(payload);
@@ -675,10 +610,15 @@ public class ArrowProjectWizard : EditorWindow
             ? $"Projekt erstellt: {response.project.display_name} ({response.project.id})"
             : "Projekt erstellt.";
         committedProjectId = response.project != null ? response.project.id : "";
-        placementSummaries = response.placements ?? Array.Empty<PlacementSummary>();
-        roomObjectSummaries = response.room_objects ?? Array.Empty<RoomObjectSummary>();
-        showPlacementStep = placementSummaries.Length > 0;
-        EditorUtility.DisplayDialog("Projekt gespeichert", "Alles wurde gespeichert. Agentenplatzierung wird angezeigt.", "OK");
+        if (draft != null && response.placements != null && response.room_objects != null)
+        {
+            draft.placement_preview = new PlacementPreview
+            {
+                room_objects = response.room_objects,
+                agent_placements = response.placements,
+            };
+        }
+        EditorUtility.DisplayDialog("Projekt gespeichert", "Alles wurde gespeichert.", "OK");
     }
 
     private void SyncDraftFields()
@@ -723,7 +663,10 @@ public class ArrowProjectWizard : EditorWindow
 
         foreach (var agent in draft.agents)
         {
-            agent.voice = "gpt-4o-mini-tts";
+            if (string.IsNullOrEmpty(agent.tts_model))
+            {
+                agent.tts_model = "gpt-4o-mini-tts";
+            }
             if (agent.knowledge_tags == null)
             {
                 continue;

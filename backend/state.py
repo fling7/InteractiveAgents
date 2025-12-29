@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .kb import KnowledgeBase
 from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_tts_audio
-from .placement import assign_spawn_points, normalize_placement_preview, suggest_agent_placements, summarize_room_objects
+from .placement import assign_spawn_points, normalize_placement_preview, summarize_room_objects
 from .projects import ProjectManager
 from .schemas import arrow_project_schema, npc_action_schema
 
@@ -539,17 +539,23 @@ class SessionStore:
         meta = self.project_manager.create_project(display_name=display_name, project_id=project_id, description=description)
         project_id = meta["id"]
 
-        placements, enriched_agents = suggest_agent_placements(session.arrow_payload, session.agents)
+        placement_preview = normalize_placement_preview(session.arrow_payload, session.agents, session.placement_preview)
+        placement_lookup = {}
+        for placement in placement_preview.get("agent_placements") or []:
+            if isinstance(placement, dict) and placement.get("id"):
+                placement_lookup[placement["id"]] = placement
+
         agents_with_positions = []
-        for agent in enriched_agents:
+        for agent in session.agents:
             agent_copy = dict(agent)
-            placement = placements.get(agent_copy.get("id"))
-            if placement:
-                agent_copy["position"] = placement.get("position")
-                agent_copy["forward"] = placement.get("forward")
-                agent_copy["spawn_point_id"] = placement.get("spawn_point_id")
-                agent_copy["zone_id"] = placement.get("zone_id")
-                agent_copy["tags"] = placement.get("tags", [])
+            placement = placement_lookup.get(agent_copy.get("id"), {})
+            position = placement.get("position")
+            if position:
+                agent_copy["position"] = position
+            agent_copy["forward"] = placement.get("forward") or {"x": 0, "y": 0, "z": 1}
+            agent_copy["spawn_point_id"] = placement.get("spawn_point_id")
+            agent_copy["zone_id"] = placement.get("zone_id")
+            agent_copy["tags"] = placement.get("tags", [])
             agents_with_positions.append(agent_copy)
 
         self.project_manager.save_agents(project_id, agents_with_positions)
@@ -565,7 +571,7 @@ class SessionStore:
         self.refresh_project_kb(project_id)
         placement_list = []
         for agent in agents_with_positions:
-            placement = placements.get(agent.get("id"), {})
+            placement = placement_lookup.get(agent.get("id"), {})
             placement_list.append(
                 {
                     "id": agent.get("id"),
@@ -581,7 +587,7 @@ class SessionStore:
             "status": "ok",
             "project": meta,
             "placements": placement_list,
-            "room_objects": summarize_room_objects(session.arrow_payload, floor_only=True),
+            "room_objects": placement_preview.get("room_objects") or summarize_room_objects(session.arrow_payload, floor_only=True),
         }
 
     def _generate_arrow_draft(
