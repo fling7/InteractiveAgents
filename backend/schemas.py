@@ -40,3 +40,58 @@ def npc_action_schema(allowed_handoff_ids: List[str]) -> Dict:
         "required": ["say", "handoff_to", "handoff_reason", "confidence"],
         "additionalProperties": False,
     }
+
+
+def arrow_project_schema() -> Dict:
+    return {
+        "type": "object",
+        "properties": {
+            "assistant_message": {"type": "string"},
+            "analysis": {"type": "string"},
+            "project": {
+                "type": "object",
+                "properties": {
+                    "display_name": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+                "required": ["display_name", "description"],
+                "additionalProperties": False,
+            },
+            "agents": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "display_name": {"type": "string"},
+                        "persona": {"type": "string"},
+                        "expertise": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "knowledge_tags": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["id", "display_name", "persona", "expertise", "knowledge_tags"],
+                    "additionalProperties": False,
+                },
+            },
+            "knowledge": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "tag": {"type": "string"},
+                        "name": {"type": "string"},
+                        "text": {"type": "string"},
+                    },
+                    "required": ["tag", "name", "text"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["assistant_message", "analysis", "project", "agents", "knowledge"],
+        "additionalProperties": False,
+    }
