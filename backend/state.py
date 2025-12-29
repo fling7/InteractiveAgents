@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .kb import KnowledgeBase
 from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_tts_audio
-from .placement import assign_spawn_points
+from .placement import assign_spawn_points, suggest_agent_placements
 from .projects import ProjectManager
 from .schemas import arrow_project_schema, npc_action_schema
 
@@ -24,6 +24,33 @@ def _slugify(s: str) -> str:
     s = re.sub(r"[^a-z0-9äöüß_-]+", "_", s, flags=re.IGNORECASE)
     s = re.sub(r"_+", "_", s).strip("_")
     return s or "agent"
+
+
+def _summarize_room_objects(room_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    objects = []
+    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
+        value = room_plan.get(key)
+        if isinstance(value, list):
+            objects.extend(value)
+
+    summaries = []
+    for idx, obj in enumerate(objects):
+        if not isinstance(obj, dict):
+            continue
+        pos = obj.get("position") or obj.get("pos") or {}
+        if not isinstance(pos, dict):
+            continue
+        position = {"x": float(pos.get("x", 0.0)), "y": float(pos.get("y", 0.0)), "z": float(pos.get("z", 0.0))}
+        size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
+        radius = 0.4
+        if isinstance(size, dict):
+            sx = float(size.get("x", 0.0)) or 0.0
+            sz = float(size.get("z", 0.0)) or 0.0
+            radius = max(0.2, 0.5 * max(abs(sx), abs(sz)))
+        name = obj.get("name") or obj.get("id") or f"Objekt {idx+1}"
+        summaries.append({"id": str(obj.get("id") or f"obj_{idx+1}"), "name": str(name), "position": position, "radius": radius})
+
+    return summaries
 
 
 @dataclass
@@ -153,13 +180,23 @@ class SessionStore:
         agents_list: List[AgentSpec] = [AgentSpec.from_dict(d, i) for i, d in enumerate(agent_dicts)]
         agents_map = {a.id: a for a in agents_list}
 
+        agent_inputs = []
+        for idx, agent in enumerate(agents_list):
+            source = agent_dicts[idx] if idx < len(agent_dicts) else {}
+            agent_inputs.append(
+                {
+                    "id": agent.id,
+                    "preferred_zone_ids": agent.preferred_zone_ids,
+                    "preferred_spawn_tags": agent.preferred_spawn_tags,
+                    "position": source.get("position") if isinstance(source, dict) else None,
+                    "forward": source.get("forward") if isinstance(source, dict) else None,
+                    "spawn_point_id": source.get("spawn_point_id") if isinstance(source, dict) else None,
+                }
+            )
+
         placements = assign_spawn_points(
             room_plan=room_plan,
-            agents=[{
-                "id": a.id,
-                "preferred_zone_ids": a.preferred_zone_ids,
-                "preferred_spawn_tags": a.preferred_spawn_tags,
-            } for a in agents_list],
+            agents=agent_inputs,
         )
 
         st = SessionState(
@@ -526,7 +563,20 @@ class SessionStore:
         meta = self.project_manager.create_project(display_name=display_name, project_id=project_id, description=description)
         project_id = meta["id"]
 
-        self.project_manager.save_agents(project_id, session.agents)
+        placements, enriched_agents = suggest_agent_placements(session.arrow_payload, session.agents)
+        agents_with_positions = []
+        for agent in enriched_agents:
+            agent_copy = dict(agent)
+            placement = placements.get(agent_copy.get("id"))
+            if placement:
+                agent_copy["position"] = placement.get("position")
+                agent_copy["forward"] = placement.get("forward")
+                agent_copy["spawn_point_id"] = placement.get("spawn_point_id")
+                agent_copy["zone_id"] = placement.get("zone_id")
+                agent_copy["tags"] = placement.get("tags", [])
+            agents_with_positions.append(agent_copy)
+
+        self.project_manager.save_agents(project_id, agents_with_positions)
         self.project_manager.save_room_plan(project_id, session.arrow_payload)
         for entry in session.knowledge:
             tag = str(entry.get("tag") or "").strip()
@@ -537,7 +587,26 @@ class SessionStore:
             self.project_manager.upsert_knowledge(project_id, tag=tag, name=name, text=text, overwrite=True)
 
         self.refresh_project_kb(project_id)
-        return {"status": "ok", "project": meta}
+        placement_list = []
+        for agent in agents_with_positions:
+            placement = placements.get(agent.get("id"), {})
+            placement_list.append(
+                {
+                    "id": agent.get("id"),
+                    "display_name": agent.get("display_name"),
+                    "position": placement.get("position"),
+                    "forward": placement.get("forward"),
+                    "spawn_point_id": placement.get("spawn_point_id"),
+                    "zone_id": placement.get("zone_id"),
+                    "tags": placement.get("tags", []),
+                }
+            )
+        return {
+            "status": "ok",
+            "project": meta,
+            "placements": placement_list,
+            "room_objects": _summarize_room_objects(session.arrow_payload),
+        }
 
     def _generate_arrow_draft(
         self,
