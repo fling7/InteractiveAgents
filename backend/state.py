@@ -12,7 +12,7 @@ from .kb import KnowledgeBase
 from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_tts_audio
 from .placement import assign_spawn_points
 from .projects import ProjectManager
-from .schemas import npc_action_schema
+from .schemas import arrow_project_schema, npc_action_schema
 
 
 def _now_ms() -> int:
@@ -97,6 +97,23 @@ class SessionState:
 
 
 @dataclass
+class ArrowProjectDraft:
+    session_id: str
+    arrow_payload: Dict[str, Any]
+    analysis: str
+    assistant_message: str
+    project: Dict[str, str]
+    agents: List[Dict[str, Any]]
+    knowledge: List[Dict[str, Any]]
+    history: List[Dict[str, str]] = field(default_factory=list)
+    created_ms: int = field(default_factory=_now_ms)
+    updated_ms: int = field(default_factory=_now_ms)
+
+    def touch(self) -> None:
+        self.updated_ms = _now_ms()
+
+
+@dataclass
 class SessionStore:
     max_history_turns: int
     max_handoffs: int
@@ -110,6 +127,7 @@ class SessionStore:
     default_agents_path: str = "examples/agents.example.json"
     sessions: Dict[str, SessionState] = field(default_factory=dict)
     kb_cache: Dict[str, KnowledgeBase] = field(default_factory=dict)
+    arrow_sessions: Dict[str, ArrowProjectDraft] = field(default_factory=dict)
 
     def _project_root(self) -> Path:
         return Path(__file__).resolve().parents[1]
@@ -434,4 +452,215 @@ class SessionStore:
             "active_agent_id": new_active,
             "handoff": handoff,
             "events": events,
+        }
+
+    def analyze_arrow(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        arrow_payload = payload.get("arrow_json")
+        if isinstance(arrow_payload, str):
+            try:
+                arrow_payload = json.loads(arrow_payload)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"arrow_json ungültig: {exc}") from exc
+        if not isinstance(arrow_payload, dict):
+            raise ValueError("arrow_json muss ein Objekt sein.")
+
+        draft_payload = self._generate_arrow_draft(arrow_payload, history=[])
+        session_id = str(uuid.uuid4())
+        draft = ArrowProjectDraft(
+            session_id=session_id,
+            arrow_payload=arrow_payload,
+            analysis=draft_payload["analysis"],
+            assistant_message=draft_payload["assistant_message"],
+            project=draft_payload["project"],
+            agents=draft_payload["agents"],
+            knowledge=draft_payload["knowledge"],
+            history=[{"role": "assistant", "content": draft_payload["assistant_message"]}] if draft_payload["assistant_message"] else [],
+        )
+        self.arrow_sessions[session_id] = draft
+        return {"session_id": session_id, "draft": draft_payload}
+
+    def arrow_chat(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("session_id fehlt.")
+        session = self.arrow_sessions.get(session_id)
+        if not session:
+            raise ValueError("Unbekannte session_id.")
+
+        user_text = str(payload.get("user_text") or "").strip()
+        if not user_text:
+            raise ValueError("user_text ist leer.")
+
+        history = session.history + [{"role": "user", "content": user_text}]
+        draft_payload = self._generate_arrow_draft(session.arrow_payload, history=history, current=session)
+
+        session.analysis = draft_payload["analysis"]
+        session.assistant_message = draft_payload["assistant_message"]
+        session.project = draft_payload["project"]
+        session.agents = draft_payload["agents"]
+        session.knowledge = draft_payload["knowledge"]
+        session.history = history + (
+            [{"role": "assistant", "content": draft_payload["assistant_message"]}]
+            if draft_payload["assistant_message"]
+            else []
+        )
+        session.history = self._trim_history(session.history)
+        session.touch()
+
+        return {"draft": draft_payload}
+
+    def commit_arrow_project(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        session_id = str(payload.get("session_id") or "").strip()
+        if not session_id:
+            raise ValueError("session_id fehlt.")
+        session = self.arrow_sessions.get(session_id)
+        if not session:
+            raise ValueError("Unbekannte session_id.")
+
+        display_name = str(payload.get("display_name") or session.project.get("display_name") or "").strip()
+        if not display_name:
+            raise ValueError("display_name fehlt.")
+        project_id = str(payload.get("project_id") or "").strip() or None
+        description = str(payload.get("description") or session.project.get("description") or "").strip()
+
+        meta = self.project_manager.create_project(display_name=display_name, project_id=project_id, description=description)
+        project_id = meta["id"]
+
+        self.project_manager.save_agents(project_id, session.agents)
+        self.project_manager.save_room_plan(project_id, session.arrow_payload)
+        for entry in session.knowledge:
+            tag = str(entry.get("tag") or "").strip()
+            name = str(entry.get("name") or "").strip()
+            if not tag or not name:
+                continue
+            text = str(entry.get("text") or "")
+            self.project_manager.upsert_knowledge(project_id, tag=tag, name=name, text=text, overwrite=True)
+
+        self.refresh_project_kb(project_id)
+        return {"status": "ok", "project": meta}
+
+    def _generate_arrow_draft(
+        self,
+        arrow_payload: Dict[str, Any],
+        *,
+        history: List[Dict[str, str]],
+        current: Optional[ArrowProjectDraft] = None,
+    ) -> Dict[str, Any]:
+        schema = arrow_project_schema()
+        arrow_text = json.dumps(arrow_payload, ensure_ascii=False, indent=2)
+        current_summary = ""
+        if current is not None:
+            current_summary = json.dumps(
+                {
+                    "analysis": current.analysis,
+                    "project": current.project,
+                    "agents": current.agents,
+                    "knowledge": current.knowledge,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        dev_prompt = (
+            "Du bist ein Projekt-Assistent für Unity. Analysiere den folgenden Agenten-Pfeil (JSON) "
+            "und leite daraus eine Projektbeschreibung, passende Agenten (mit Personas), und benötigte "
+            "Wissenseinträge ab. Antworte präzise, strukturiert und auf Deutsch. "
+            "Gib eine kurze assistant_message, die dem Nutzer die Analyse und evtl. Rückfragen zusammenfasst."
+            "\n\nAgenten-Pfeil JSON:\n"
+            f"{arrow_text}"
+        )
+
+        input_msgs: List[Dict[str, Any]] = [{"role": "developer", "content": dev_prompt}]
+        if current_summary:
+            input_msgs.append(
+                {
+                    "role": "developer",
+                    "content": "Aktueller Entwurf (bei Aktualisierung berücksichtigen):\n" + current_summary,
+                }
+            )
+        for m in history:
+            input_msgs.append({"role": m["role"], "content": m["content"]})
+
+        try:
+            parsed, resp, out_text = self.openai.create_structured_json(
+                model=self.model,
+                input_messages=input_msgs,
+                schema=schema,
+                schema_name="arrow_project",
+                temperature=self.temperature,
+            )
+        except OpenAIHTTPError as e:
+            if e.status != 400:
+                raise
+            parsed, resp, out_text = self.openai.create_json_object(
+                model=self.model,
+                input_messages=input_msgs,
+                temperature=self.temperature,
+            )
+
+        return self._normalize_arrow_draft(parsed, fallback=current)
+
+    def _normalize_arrow_draft(
+        self,
+        parsed: Dict[str, Any],
+        fallback: Optional[ArrowProjectDraft] = None,
+    ) -> Dict[str, Any]:
+        fallback_project = fallback.project if fallback else {}
+        fallback_agents = fallback.agents if fallback else []
+        fallback_knowledge = fallback.knowledge if fallback else []
+
+        assistant_message = str(parsed.get("assistant_message") or fallback.assistant_message if fallback else "").strip()
+        analysis = str(parsed.get("analysis") or fallback.analysis if fallback else "").strip()
+
+        project_data = parsed.get("project") or {}
+        display_name = str(project_data.get("display_name") or fallback_project.get("display_name") or "Neues Projekt").strip()
+        description = str(project_data.get("description") or fallback_project.get("description") or "").strip()
+
+        agents_raw = parsed.get("agents")
+        if not isinstance(agents_raw, list):
+            agents_raw = fallback_agents
+        agents: List[Dict[str, Any]] = []
+        for idx, agent in enumerate(agents_raw or []):
+            if not isinstance(agent, dict):
+                continue
+            display = str(agent.get("display_name") or f"Agent {idx+1}").strip()
+            agent_id = str(agent.get("id") or _slugify(display) or f"agent_{idx+1}").strip()
+            persona = str(agent.get("persona") or "").strip()
+            expertise = agent.get("expertise") or []
+            if isinstance(expertise, str):
+                expertise = [expertise]
+            knowledge_tags = agent.get("knowledge_tags") or []
+            if isinstance(knowledge_tags, str):
+                knowledge_tags = [knowledge_tags]
+            agents.append(
+                {
+                    "id": agent_id,
+                    "display_name": display,
+                    "persona": persona,
+                    "expertise": [str(x) for x in expertise],
+                    "knowledge_tags": [str(x) for x in knowledge_tags],
+                }
+            )
+
+        knowledge_raw = parsed.get("knowledge")
+        if not isinstance(knowledge_raw, list):
+            knowledge_raw = fallback_knowledge
+        knowledge: List[Dict[str, Any]] = []
+        for entry in knowledge_raw or []:
+            if not isinstance(entry, dict):
+                continue
+            tag = str(entry.get("tag") or "").strip()
+            name = str(entry.get("name") or "").strip()
+            text = str(entry.get("text") or "").strip()
+            knowledge.append({"tag": tag, "name": name, "text": text})
+
+        return {
+            "assistant_message": assistant_message,
+            "analysis": analysis,
+            "project": {
+                "display_name": display_name,
+                "description": description,
+            },
+            "agents": agents,
+            "knowledge": knowledge,
         }
