@@ -13,6 +13,14 @@ using UnityEditor;
 public class ProjectManagerUI : EditorWindow
 {
     [Serializable]
+    public class Vector3Data
+    {
+        public float x;
+        public float y;
+        public float z;
+    }
+
+    [Serializable]
     public class ProjectSummary
     {
         public string id;
@@ -44,6 +52,7 @@ public class ProjectManagerUI : EditorWindow
         public string[] knowledge_tags;
         public string[] preferred_zone_ids;
         public string[] preferred_spawn_tags;
+        public Vector3Data position;
         public string voice;
         public string voice_style;
         public string tts_model;
@@ -130,6 +139,8 @@ public class ProjectManagerUI : EditorWindow
         public string voiceStyle;
         public string ttsModel;
         public string voiceGender;
+        public bool hasPosition;
+        public Vector3Data position;
     }
 
     private class EditorCoroutine
@@ -186,6 +197,8 @@ public class ProjectManagerUI : EditorWindow
     private KnowledgeEntrySummary[] knowledgeEntries = Array.Empty<KnowledgeEntrySummary>();
     private Vector2 scroll;
     private string statusMessage = "";
+    private int draggingAgentIndex = -1;
+    private bool isDraggingPosition = false;
 
     private string newProjectName = "";
     private string newProjectId = "";
@@ -323,6 +336,9 @@ public class ProjectManagerUI : EditorWindow
                 agent.voice = LabeledTextField("Voice", agent.voice);
                 agent.voiceStyle = LabeledTextField("Voice Style", agent.voiceStyle);
                 agent.ttsModel = LabeledTextField("TTS Model", agent.ttsModel);
+                EditorGUILayout.Space(4f);
+                EditorGUILayout.LabelField("Positionierung", EditorStyles.boldLabel);
+                DrawPositionEditor(agent, i);
                 EditorGUILayout.EndVertical();
             }
 
@@ -419,6 +435,15 @@ public class ProjectManagerUI : EditorWindow
         return value;
     }
 
+    private static float LabeledFloatField(string label, float value)
+    {
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField(label, GUILayout.Width(150));
+        value = EditorGUILayout.FloatField(value);
+        EditorGUILayout.EndHorizontal();
+        return value;
+    }
+
     private void DrawVoiceOptions(AgentUi agent)
     {
         if (agent == null)
@@ -490,6 +515,162 @@ public class ProjectManagerUI : EditorWindow
         }
 
         return null;
+    }
+
+    private void DrawPositionEditor(AgentUi agent, int agentIndex)
+    {
+        if (agent == null)
+        {
+            return;
+        }
+
+        agent.hasPosition = EditorGUILayout.Toggle("Position aktiv", agent.hasPosition);
+        if (!agent.hasPosition)
+        {
+            return;
+        }
+
+        if (agent.position == null)
+        {
+            agent.position = new Vector3Data { x = 0f, y = 0f, z = 0f };
+        }
+
+        agent.position.x = LabeledFloatField("X", agent.position.x);
+        agent.position.y = LabeledFloatField("Y", agent.position.y);
+        agent.position.z = LabeledFloatField("Z", agent.position.z);
+
+        EditorGUILayout.LabelField("2D-Vorschau (X/Z)", EditorStyles.miniBoldLabel);
+        DrawPositionPreview(agentIndex);
+        EditorGUILayout.HelpBox("Im Vorschaubereich klicken/ziehen, um X/Z zu verschieben.", MessageType.None);
+    }
+
+    private void DrawPositionPreview(int agentIndex)
+    {
+        const float previewSize = 220f;
+        var rect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.ExpandWidth(true));
+        EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
+
+        var positions = new List<Vector3Data>();
+        for (var i = 0; i < agentUiList.Count; i++)
+        {
+            var entry = agentUiList[i];
+            if (entry != null && entry.hasPosition && entry.position != null)
+            {
+                positions.Add(entry.position);
+            }
+        }
+
+        if (positions.Count == 0)
+        {
+            var fallback = agentUiList.Count > agentIndex ? agentUiList[agentIndex]?.position : null;
+            if (fallback != null)
+            {
+                positions.Add(fallback);
+            }
+            else
+            {
+                GUI.Label(rect, "Keine Positionsdaten verfügbar.", EditorStyles.centeredGreyMiniLabel);
+                return;
+            }
+        }
+
+        var minX = float.PositiveInfinity;
+        var maxX = float.NegativeInfinity;
+        var minZ = float.PositiveInfinity;
+        var maxZ = float.NegativeInfinity;
+        foreach (var pos in positions)
+        {
+            minX = Mathf.Min(minX, pos.x);
+            maxX = Mathf.Max(maxX, pos.x);
+            minZ = Mathf.Min(minZ, pos.z);
+            maxZ = Mathf.Max(maxZ, pos.z);
+        }
+
+        var padding = 0.5f;
+        minX -= padding;
+        maxX += padding;
+        minZ -= padding;
+        maxZ += padding;
+        var spanX = Mathf.Max(1f, maxX - minX);
+        var spanZ = Mathf.Max(1f, maxZ - minZ);
+        var scale = Mathf.Min(rect.width / spanX, rect.height / spanZ);
+
+        Vector2 WorldToPreview(Vector3Data position)
+        {
+            var x = rect.x + (position.x - minX) * scale;
+            var z = rect.y + rect.height - (position.z - minZ) * scale;
+            return new Vector2(x, z);
+        }
+
+        Vector3Data PreviewToWorld(Vector2 screenPosition)
+        {
+            var worldX = (screenPosition.x - rect.x) / scale + minX;
+            var worldZ = (rect.y + rect.height - screenPosition.y) / scale + minZ;
+            return new Vector3Data { x = worldX, y = 0f, z = worldZ };
+        }
+
+        Handles.BeginGUI();
+        for (var i = 0; i < agentUiList.Count; i++)
+        {
+            var entry = agentUiList[i];
+            if (entry == null || !entry.hasPosition || entry.position == null)
+            {
+                continue;
+            }
+
+            var center = WorldToPreview(entry.position);
+            Handles.color = i == agentIndex ? new Color(0.95f, 0.6f, 0.2f, 0.95f) : new Color(0.35f, 0.7f, 1f, 0.7f);
+            Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, i == agentIndex ? 6f : 4f);
+        }
+        Handles.EndGUI();
+
+        var evt = Event.current;
+        if (evt == null)
+        {
+            return;
+        }
+
+        if (evt.type == EventType.MouseDown && rect.Contains(evt.mousePosition))
+        {
+            draggingAgentIndex = agentIndex;
+            isDraggingPosition = true;
+            UpdateAgentPositionFromPreview(agentIndex, PreviewToWorld(evt.mousePosition));
+            evt.Use();
+        }
+        else if (evt.type == EventType.MouseDrag && isDraggingPosition && draggingAgentIndex == agentIndex)
+        {
+            UpdateAgentPositionFromPreview(agentIndex, PreviewToWorld(evt.mousePosition));
+            evt.Use();
+        }
+        else if (evt.type == EventType.MouseUp && isDraggingPosition && draggingAgentIndex == agentIndex)
+        {
+            isDraggingPosition = false;
+            draggingAgentIndex = -1;
+            evt.Use();
+        }
+    }
+
+    private void UpdateAgentPositionFromPreview(int agentIndex, Vector3Data updated)
+    {
+        if (agentIndex < 0 || agentIndex >= agentUiList.Count)
+        {
+            return;
+        }
+
+        var agent = agentUiList[agentIndex];
+        if (agent == null)
+        {
+            return;
+        }
+
+        if (agent.position == null)
+        {
+            agent.position = new Vector3Data();
+        }
+
+        agent.position.x = updated.x;
+        agent.position.z = updated.z;
+        Repaint();
     }
 
     private void LogStatus(string message)
@@ -610,6 +791,7 @@ public class ProjectManagerUI : EditorWindow
         agentUiList.Clear();
         foreach (var agent in agents)
         {
+            var hasPosition = agent.position != null;
             agentUiList.Add(new AgentUi
             {
                 id = agent.id ?? "",
@@ -623,6 +805,13 @@ public class ProjectManagerUI : EditorWindow
                 voiceStyle = agent.voice_style ?? "",
                 ttsModel = agent.tts_model ?? "",
                 voiceGender = ResolveGenderForVoice(agent.voice) ?? voiceGenderOptions[0],
+                hasPosition = hasPosition,
+                position = hasPosition ? new Vector3Data
+                {
+                    x = agent.position.x,
+                    y = agent.position.y,
+                    z = agent.position.z,
+                } : new Vector3Data { x = 0f, y = 0f, z = 0f },
             });
         }
     }
@@ -669,6 +858,12 @@ public class ProjectManagerUI : EditorWindow
                 knowledge_tags = ParseCsv(agent.knowledgeTagsCsv),
                 preferred_zone_ids = ParseCsv(agent.preferredZoneIdsCsv),
                 preferred_spawn_tags = ParseCsv(agent.preferredSpawnTagsCsv),
+                position = agent.hasPosition ? new Vector3Data
+                {
+                    x = agent.position != null ? agent.position.x : 0f,
+                    y = agent.position != null ? agent.position.y : 0f,
+                    z = agent.position != null ? agent.position.z : 0f,
+                } : null,
                 voice = agent.voice,
                 voice_style = agent.voiceStyle,
                 tts_model = agent.ttsModel,
