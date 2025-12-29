@@ -172,6 +172,9 @@ public class ArrowProjectWizard : EditorWindow
     private string projectDisplayName = "";
     private string projectId = "";
     private string projectDescription = "";
+    private bool isAnalyzing;
+    private bool isChatting;
+    private bool isCommitting;
 
     [MenuItem("Tools/MLDSI Project Wizard")]
     public static void ShowWindow()
@@ -233,6 +236,7 @@ public class ArrowProjectWizard : EditorWindow
         {
             EditorGUILayout.HelpBox(statusMessage, MessageType.Info);
         }
+        DrawLoadingIndicator();
 
         DrawDraft();
         DrawChat();
@@ -293,7 +297,8 @@ public class ArrowProjectWizard : EditorWindow
 
         if (!string.IsNullOrEmpty(draft.analysis))
         {
-            EditorGUILayout.TextArea(draft.analysis, GUILayout.MinHeight(80));
+            var wordWrapStyle = new GUIStyle(EditorStyles.textArea) { wordWrap = true };
+            EditorGUILayout.TextArea(draft.analysis, wordWrapStyle, GUILayout.MinHeight(80));
         }
 
         if (draft.agents != null && draft.agents.Length > 0)
@@ -303,34 +308,34 @@ public class ArrowProjectWizard : EditorWindow
             foreach (var agent in draft.agents)
             {
                 EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField($"{agent.display_name} ({agent.id})");
+                EditorGUILayout.LabelField($"{agent.display_name} ({agent.id})", EditorStyles.wordWrappedLabel);
                 if (!string.IsNullOrEmpty(agent.persona))
                 {
-                    EditorGUILayout.LabelField("Persona", agent.persona);
+                    EditorGUILayout.LabelField("Persona", agent.persona, EditorStyles.wordWrappedLabel);
                 }
                 if (agent.expertise != null && agent.expertise.Length > 0)
                 {
-                    EditorGUILayout.LabelField("Expertise", string.Join(", ", agent.expertise));
+                    EditorGUILayout.LabelField("Expertise", string.Join(", ", agent.expertise), EditorStyles.wordWrappedLabel);
                 }
                 if (agent.knowledge_tags != null && agent.knowledge_tags.Length > 0)
                 {
-                    EditorGUILayout.LabelField("Knowledge Tags", string.Join(", ", agent.knowledge_tags));
+                    EditorGUILayout.LabelField("Knowledge Tags", string.Join(", ", agent.knowledge_tags), EditorStyles.wordWrappedLabel);
                 }
                 if (!string.IsNullOrEmpty(agent.voice))
                 {
-                    EditorGUILayout.LabelField("Stimme", agent.voice);
+                    EditorGUILayout.LabelField("Stimme", agent.voice, EditorStyles.wordWrappedLabel);
                 }
                 if (!string.IsNullOrEmpty(agent.voice_gender))
                 {
-                    EditorGUILayout.LabelField("Stimmgeschlecht", agent.voice_gender);
+                    EditorGUILayout.LabelField("Stimmgeschlecht", agent.voice_gender, EditorStyles.wordWrappedLabel);
                 }
                 if (!string.IsNullOrEmpty(agent.voice_style))
                 {
-                    EditorGUILayout.LabelField("Stimmtonalität", agent.voice_style);
+                    EditorGUILayout.LabelField("Stimmtonalität", agent.voice_style, EditorStyles.wordWrappedLabel);
                 }
                 if (!string.IsNullOrEmpty(agent.tts_model))
                 {
-                    EditorGUILayout.LabelField("TTS-Modell", agent.tts_model);
+                    EditorGUILayout.LabelField("TTS-Modell", agent.tts_model, EditorStyles.wordWrappedLabel);
                 }
                 EditorGUILayout.EndVertical();
             }
@@ -343,10 +348,11 @@ public class ArrowProjectWizard : EditorWindow
             foreach (var knowledge in draft.knowledge)
             {
                 EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField($"{knowledge.tag}/{knowledge.name}");
+                EditorGUILayout.LabelField($"{knowledge.tag}/{knowledge.name}", EditorStyles.wordWrappedLabel);
                 if (!string.IsNullOrEmpty(knowledge.text))
                 {
-                    EditorGUILayout.TextArea(knowledge.text, GUILayout.MinHeight(60));
+                    var wordWrapStyle = new GUIStyle(EditorStyles.textArea) { wordWrap = true };
+                    EditorGUILayout.TextArea(knowledge.text, wordWrapStyle, GUILayout.MinHeight(60));
                 }
                 EditorGUILayout.EndVertical();
             }
@@ -363,7 +369,7 @@ public class ArrowProjectWizard : EditorWindow
         EditorGUILayout.Space();
         EditorGUILayout.LabelField("Chat", EditorStyles.boldLabel);
 
-        chatScroll = EditorGUILayout.BeginScrollView(chatScroll, GUILayout.MinHeight(140));
+        chatScroll = EditorGUILayout.BeginScrollView(chatScroll, GUILayout.MinHeight(140), GUILayout.ExpandHeight(true));
         foreach (var line in chatLog)
         {
             EditorGUILayout.LabelField(line, EditorStyles.wordWrappedLabel);
@@ -390,7 +396,9 @@ public class ArrowProjectWizard : EditorWindow
         EditorGUILayout.LabelField("Projekt erstellen", EditorStyles.boldLabel);
         projectDisplayName = EditorGUILayout.TextField("Name", projectDisplayName);
         projectId = EditorGUILayout.TextField("Projekt-ID (optional)", projectId);
-        projectDescription = EditorGUILayout.TextField("Beschreibung", projectDescription);
+        var wordWrapStyle = new GUIStyle(EditorStyles.textArea) { wordWrap = true };
+        EditorGUILayout.LabelField("Beschreibung");
+        projectDescription = EditorGUILayout.TextArea(projectDescription, wordWrapStyle, GUILayout.MinHeight(60));
 
         if (GUILayout.Button("Abschließen", GUILayout.Height(28)))
         {
@@ -400,6 +408,8 @@ public class ArrowProjectWizard : EditorWindow
 
     private void ResetState()
     {
+        arrowFilePath = "";
+        arrowJson = "";
         sessionId = "";
         draft = null;
         chatLog.Clear();
@@ -408,6 +418,9 @@ public class ArrowProjectWizard : EditorWindow
         projectId = "";
         projectDescription = "";
         statusMessage = "";
+        isAnalyzing = false;
+        isChatting = false;
+        isCommitting = false;
     }
 
     private void LoadArrowFile(string assetPath)
@@ -427,10 +440,11 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         statusMessage = "Analyse läuft...";
+        isAnalyzing = true;
         var payload = new AnalyzeRequest { arrow_json = arrowJson };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/analyze";
-        ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnAnalyzeResponse)));
+        ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnAnalyzeResponse, () => isAnalyzing = false)));
     }
 
     private void SendChat()
@@ -444,10 +458,11 @@ public class ArrowProjectWizard : EditorWindow
         chatInput = "";
         chatLog.Add("Du: " + message);
         statusMessage = "Chat läuft...";
+        isChatting = true;
         var payload = new ChatRequest { session_id = sessionId, user_text = message };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/chat";
-        ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnChatResponse)));
+        ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnChatResponse, () => isChatting = false)));
     }
 
     private void CommitProject()
@@ -459,6 +474,7 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         statusMessage = "Projekt wird erstellt...";
+        isCommitting = true;
         var payload = new CommitRequest
         {
             session_id = sessionId,
@@ -468,10 +484,10 @@ public class ArrowProjectWizard : EditorWindow
         };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/commit";
-        ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnCommitResponse)));
+        ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnCommitResponse, () => isCommitting = false)));
     }
 
-    private IEnumerator SendRequest(string url, string jsonBody, Action<string> onSuccess)
+    private IEnumerator SendRequest(string url, string jsonBody, Action<string> onSuccess, Action onComplete)
     {
         using (var request = new UnityWebRequest(url, "POST"))
         {
@@ -485,10 +501,12 @@ public class ArrowProjectWizard : EditorWindow
             if (request.result != UnityWebRequest.Result.Success)
             {
                 statusMessage = "Fehler: " + request.error;
+                onComplete?.Invoke();
                 yield break;
             }
 
             onSuccess?.Invoke(request.downloadHandler.text);
+            onComplete?.Invoke();
         }
     }
 
@@ -541,10 +559,13 @@ public class ArrowProjectWizard : EditorWindow
         statusMessage = response.project != null
             ? $"Projekt erstellt: {response.project.display_name} ({response.project.id})"
             : "Projekt erstellt.";
+        EditorUtility.DisplayDialog("Projekt gespeichert", "Alles wurde gespeichert.", "OK");
+        ResetState();
     }
 
     private void SyncDraftFields()
     {
+        NormalizeKnowledgeTags();
         if (draft?.project == null)
         {
             return;
@@ -558,6 +579,64 @@ public class ArrowProjectWizard : EditorWindow
         {
             projectDescription = draft.project.description;
         }
+    }
+
+    private void NormalizeKnowledgeTags()
+    {
+        if (draft?.knowledge == null || draft.agents == null)
+        {
+            return;
+        }
+
+        var tagLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in draft.knowledge)
+        {
+            if (!string.IsNullOrEmpty(entry.tag) && !tagLookup.ContainsKey(entry.tag))
+            {
+                tagLookup.Add(entry.tag, entry.tag);
+            }
+        }
+
+        foreach (var agent in draft.agents)
+        {
+            if (agent.knowledge_tags == null)
+            {
+                continue;
+            }
+
+            for (int i = 0; i < agent.knowledge_tags.Length; i++)
+            {
+                var tag = agent.knowledge_tags[i];
+                if (string.IsNullOrEmpty(tag))
+                {
+                    continue;
+                }
+
+                if (tagLookup.TryGetValue(tag, out var canonicalTag))
+                {
+                    agent.knowledge_tags[i] = canonicalTag;
+                }
+            }
+        }
+    }
+
+    private void DrawLoadingIndicator()
+    {
+        if (!isAnalyzing && !isChatting && !isCommitting)
+        {
+            return;
+        }
+
+        var spinnerIndex = Mathf.FloorToInt((float)(EditorApplication.timeSinceStartup * 10f) % 12f);
+        var spinner = EditorGUIUtility.IconContent($"WaitSpin{spinnerIndex:00}");
+        if (spinner != null && spinner.image != null)
+        {
+            GUILayout.Label(spinner, GUILayout.Width(20), GUILayout.Height(20));
+        }
+
+        var loadingMessage = isCommitting ? "Speichert..." : "Warte auf Antwort...";
+        EditorGUILayout.LabelField(loadingMessage, EditorStyles.wordWrappedLabel);
+        Repaint();
     }
 }
 #endif
