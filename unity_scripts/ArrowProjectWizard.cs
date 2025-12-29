@@ -50,6 +50,10 @@ public class ArrowProjectWizard : EditorWindow
         public string persona;
         public string[] expertise;
         public string[] knowledge_tags;
+        public string voice;
+        public string voice_style;
+        public string voice_gender;
+        public string tts_model;
     }
 
     [Serializable]
@@ -169,10 +173,10 @@ public class ArrowProjectWizard : EditorWindow
     private string projectId = "";
     private string projectDescription = "";
 
-    [MenuItem("Tools/Arrow Project Wizard")]
+    [MenuItem("Tools/MLDSI Project Wizard")]
     public static void ShowWindow()
     {
-        var window = GetWindow<ArrowProjectWizard>("Arrow Project Wizard");
+        var window = GetWindow<ArrowProjectWizard>("MLDSI Project Wizard");
         window.minSize = new Vector2(620, 620);
     }
 
@@ -206,7 +210,7 @@ public class ArrowProjectWizard : EditorWindow
         backendBaseUrl = EditorGUILayout.TextField("Backend Base Url", backendBaseUrl);
 
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Pfeil-Datei", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("MLDSI-Datei", EditorStyles.boldLabel);
         DrawDropZone();
 
         if (!string.IsNullOrEmpty(arrowFilePath))
@@ -215,7 +219,7 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         EditorGUILayout.BeginHorizontal();
-        if (GUILayout.Button("Pfeil analysieren", GUILayout.Height(28)))
+        if (GUILayout.Button("MLDSI analysieren", GUILayout.Height(28)))
         {
             StartAnalyze();
         }
@@ -240,7 +244,7 @@ public class ArrowProjectWizard : EditorWindow
     private void DrawDropZone()
     {
         var dropRect = GUILayoutUtility.GetRect(0f, 60f, GUILayout.ExpandWidth(true));
-        GUI.Box(dropRect, "Pfeil-JSON hierhin ziehen");
+        GUI.Box(dropRect, "MLDSI-JSON hierhin ziehen");
 
         var evt = Event.current;
         if (!dropRect.Contains(evt.mousePosition))
@@ -261,7 +265,8 @@ public class ArrowProjectWizard : EditorWindow
                     {
                         continue;
                     }
-                    if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                        || path.EndsWith(".mldsi", StringComparison.OrdinalIgnoreCase))
                     {
                         LoadArrowFile(path);
                         break;
@@ -310,6 +315,22 @@ public class ArrowProjectWizard : EditorWindow
                 if (agent.knowledge_tags != null && agent.knowledge_tags.Length > 0)
                 {
                     EditorGUILayout.LabelField("Knowledge Tags", string.Join(", ", agent.knowledge_tags));
+                }
+                if (!string.IsNullOrEmpty(agent.voice))
+                {
+                    EditorGUILayout.LabelField("Stimme", agent.voice);
+                }
+                if (!string.IsNullOrEmpty(agent.voice_gender))
+                {
+                    EditorGUILayout.LabelField("Stimmgeschlecht", agent.voice_gender);
+                }
+                if (!string.IsNullOrEmpty(agent.voice_style))
+                {
+                    EditorGUILayout.LabelField("Stimmtonalität", agent.voice_style);
+                }
+                if (!string.IsNullOrEmpty(agent.tts_model))
+                {
+                    EditorGUILayout.LabelField("TTS-Modell", agent.tts_model);
                 }
                 EditorGUILayout.EndVertical();
             }
@@ -394,14 +415,14 @@ public class ArrowProjectWizard : EditorWindow
         var fullPath = Path.GetFullPath(assetPath);
         arrowFilePath = fullPath;
         arrowJson = File.ReadAllText(fullPath, Encoding.UTF8);
-        statusMessage = "Pfeil geladen.";
+        statusMessage = "MLDSI geladen.";
     }
 
     private void StartAnalyze()
     {
         if (string.IsNullOrEmpty(arrowJson))
         {
-            statusMessage = "Bitte zuerst eine Pfeil-JSON laden.";
+            statusMessage = "Bitte zuerst eine MLDSI-JSON laden.";
             return;
         }
 

@@ -86,9 +86,9 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                                 "POST /chat": "Chat mit Agent",
                                 "GET /projects": "Projekte auflisten",
                                 "POST /projects/create": "Projekt erstellen",
-                                "POST /projects/arrow/analyze": "Pfeil analysieren",
-                                "POST /projects/arrow/chat": "Pfeil-Chat fortsetzen",
-                                "POST /projects/arrow/commit": "Projekt aus Pfeil erstellen",
+                                "POST /projects/arrow/analyze": "MLDSI analysieren",
+                                "POST /projects/arrow/chat": "MLDSI-Chat fortsetzen",
+                                "POST /projects/arrow/commit": "Projekt aus MLDSI erstellen",
                                 "GET /projects/{id}": "Projekt-Details laden",
                                 "POST /projects/{id}/metadata": "Projekt-Metadaten speichern",
                                 "POST /projects/{id}/agents": "Agenten speichern",
@@ -161,15 +161,15 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                     )
                     return self._send_json(200, {"project": out})
                 if path == "/projects/arrow/analyze":
-                    self._log_action("Pfeil analysieren")
+                    self._log_action("MLDSI analysieren")
                     out = store.analyze_arrow(payload)
                     return self._send_json(200, out)
                 if path == "/projects/arrow/chat":
-                    self._log_action("Pfeil-Chat fortsetzen")
+                    self._log_action("MLDSI-Chat fortsetzen")
                     out = store.arrow_chat(payload)
                     return self._send_json(200, out)
                 if path == "/projects/arrow/commit":
-                    self._log_action("Projekt aus Pfeil erstellen")
+                    self._log_action("Projekt aus MLDSI erstellen")
                     out = store.commit_arrow_project(payload)
                     return self._send_json(200, out)
                 parts = [p for p in path.split("/") if p]
