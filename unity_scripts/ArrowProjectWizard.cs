@@ -63,6 +63,13 @@ public class ArrowProjectWizard : EditorWindow
     }
 
     [Serializable]
+    public class PlacementPreview
+    {
+        public RoomObjectSummary[] room_objects;
+        public PlacementSummary[] agent_placements;
+    }
+
+    [Serializable]
     public class RoomObjectSummary
     {
         public string id;
@@ -101,6 +108,7 @@ public class ArrowProjectWizard : EditorWindow
         public DraftProject project;
         public AgentSpec[] agents;
         public KnowledgeEntry[] knowledge;
+        public PlacementPreview placement_preview;
     }
 
     [Serializable]
@@ -394,6 +402,19 @@ public class ArrowProjectWizard : EditorWindow
                 EditorGUILayout.EndVertical();
             }
         }
+
+        if (draft.placement_preview != null
+            && draft.placement_preview.room_objects != null
+            && draft.placement_preview.agent_placements != null)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Platzierungsvorschau (OpenAI)", EditorStyles.boldLabel);
+            DrawPlacementPreview(
+                draft.placement_preview.room_objects,
+                draft.placement_preview.agent_placements,
+                "Legende: Blau = Objekt, Orange = Agent"
+            );
+        }
     }
 
     private void DrawChat()
@@ -487,7 +508,11 @@ public class ArrowProjectWizard : EditorWindow
         }
         EditorGUILayout.EndScrollView();
 
-        DrawPlacementPreview();
+        DrawPlacementPreview(
+            roomObjectSummaries,
+            placementSummaries,
+            "Legende: Blau = Objekt, Orange = Agent"
+        );
     }
 
     private void ResetState()
@@ -752,16 +777,20 @@ public class ArrowProjectWizard : EditorWindow
         Repaint();
     }
 
-    private void DrawPlacementPreview()
+    private void DrawPlacementPreview(
+        RoomObjectSummary[] roomObjects,
+        PlacementSummary[] placements,
+        string legend
+    )
     {
         const float previewSize = 260f;
         var rect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.ExpandWidth(true));
         EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
 
         var positions = new List<Vector3Data>();
-        if (roomObjectSummaries != null)
+        if (roomObjects != null)
         {
-            foreach (var obj in roomObjectSummaries)
+            foreach (var obj in roomObjects)
             {
                 if (obj?.position != null)
                 {
@@ -769,9 +798,9 @@ public class ArrowProjectWizard : EditorWindow
                 }
             }
         }
-        if (placementSummaries != null)
+        if (placements != null)
         {
-            foreach (var placement in placementSummaries)
+            foreach (var placement in placements)
             {
                 if (placement?.position != null)
                 {
@@ -818,10 +847,10 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         Handles.BeginGUI();
-        if (roomObjectSummaries != null)
+        if (roomObjects != null)
         {
             Handles.color = new Color(0.45f, 0.55f, 0.6f, 0.7f);
-            foreach (var obj in roomObjectSummaries)
+            foreach (var obj in roomObjects)
             {
                 if (obj?.position == null)
                 {
@@ -833,10 +862,10 @@ public class ArrowProjectWizard : EditorWindow
             }
         }
 
-        if (placementSummaries != null)
+        if (placements != null)
         {
             Handles.color = new Color(0.95f, 0.55f, 0.2f, 0.9f);
-            foreach (var placement in placementSummaries)
+            foreach (var placement in placements)
             {
                 if (placement?.position == null)
                 {
@@ -849,7 +878,7 @@ public class ArrowProjectWizard : EditorWindow
         Handles.EndGUI();
 
         var legendRect = GUILayoutUtility.GetRect(rect.width, 18f);
-        EditorGUI.LabelField(legendRect, "Legende: Blau = Objekt, Orange = Agent", EditorStyles.miniLabel);
+        EditorGUI.LabelField(legendRect, legend, EditorStyles.miniLabel);
     }
 }
 #endif
