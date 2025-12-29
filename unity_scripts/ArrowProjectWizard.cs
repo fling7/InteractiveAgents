@@ -663,6 +663,11 @@ public class ArrowProjectWizard : EditorWindow
 
         foreach (var agent in draft.agents)
         {
+            if (!string.IsNullOrEmpty(agent.tts_model)
+                && string.Equals(agent.tts_model.Trim(), "standard", StringComparison.OrdinalIgnoreCase))
+            {
+                agent.tts_model = "";
+            }
             if (string.IsNullOrEmpty(agent.tts_model))
             {
                 agent.tts_model = "gpt-4o-mini-tts";
