@@ -562,11 +562,19 @@ class SessionStore:
             )
 
         dev_prompt = (
-            "Du bist ein Projekt-Assistent für Unity. Analysiere den folgenden Agenten-Pfeil (JSON) "
+            "Du bist ein Projekt-Assistent für Unity. Analysiere die folgende MLDSI-Datei (JSON) "
             "und leite daraus eine Projektbeschreibung, passende Agenten (mit Personas), und benötigte "
             "Wissenseinträge ab. Antworte präzise, strukturiert und auf Deutsch. "
+            "Die Agentenauswahl soll sich am Raumtyp orientieren (z. B. Klassenraum -> Lehrer, Schüler, Rektor; "
+            "Firmenpräsentation -> PR, Marketing, Vertrieb, Technik). Nutze die Raum-Beschreibung/Metadaten "
+            "aus der MLDSI-Datei als primäre Leitlinie für Rollen, Ton und Expertise. "
+            "Gib außerdem für jeden Agenten passende Voice-Settings an: "
+            "voice_gender (\"weiblich\" oder \"männlich\"), voice (Stimm-ID passend zum Geschlecht), "
+            "voice_style (z. B. klar, kreativ, präzise, warm, neutral) und tts_model. "
+            "Verwende nach Möglichkeit folgende Stimm-IDs: weiblich = coral, nova, shimmer; "
+            "männlich = alloy, verse, onyx, fable, echo. "
             "Gib eine kurze assistant_message, die dem Nutzer die Analyse und evtl. Rückfragen zusammenfasst."
-            "\n\nAgenten-Pfeil JSON:\n"
+            "\n\nMLDSI JSON:\n"
             f"{arrow_text}"
         )
 
@@ -626,17 +634,40 @@ class SessionStore:
             display = str(agent.get("display_name") or f"Agent {idx+1}").strip()
             agent_id = str(agent.get("id") or _slugify(display) or f"agent_{idx+1}").strip()
             persona = str(agent.get("persona") or "").strip()
+            voice = str(agent.get("voice") or "").strip()
+            voice_gender = str(agent.get("voice_gender") or "").strip()
+            voice_style = str(agent.get("voice_style") or "").strip()
+            tts_model = str(agent.get("tts_model") or "").strip()
             expertise = agent.get("expertise") or []
             if isinstance(expertise, str):
                 expertise = [expertise]
             knowledge_tags = agent.get("knowledge_tags") or []
             if isinstance(knowledge_tags, str):
                 knowledge_tags = [knowledge_tags]
+            if not voice_gender and voice:
+                if voice in {"coral", "nova", "shimmer"}:
+                    voice_gender = "weiblich"
+                elif voice in {"alloy", "verse", "onyx", "fable", "echo"}:
+                    voice_gender = "männlich"
+            if not voice and voice_gender:
+                voice = "coral" if voice_gender == "weiblich" else "alloy"
+            if not voice:
+                voice = "alloy"
+            if not voice_gender:
+                voice_gender = "weiblich" if voice in {"coral", "nova", "shimmer"} else "männlich"
+            if not voice_style:
+                voice_style = "neutral"
+            if not tts_model:
+                tts_model = "gpt-4o-mini-tts"
             agents.append(
                 {
                     "id": agent_id,
                     "display_name": display,
                     "persona": persona,
+                    "voice": voice,
+                    "voice_gender": voice_gender,
+                    "voice_style": voice_style,
+                    "tts_model": tts_model,
                     "expertise": [str(x) for x in expertise],
                     "knowledge_tags": [str(x) for x in knowledge_tags],
                 }
