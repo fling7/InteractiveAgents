@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .kb import KnowledgeBase
 from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_tts_audio
-from .placement import assign_spawn_points, suggest_agent_placements
+from .placement import assign_spawn_points, normalize_placement_preview, suggest_agent_placements, summarize_room_objects
 from .projects import ProjectManager
 from .schemas import arrow_project_schema, npc_action_schema
 
@@ -24,33 +24,6 @@ def _slugify(s: str) -> str:
     s = re.sub(r"[^a-z0-9äöüß_-]+", "_", s, flags=re.IGNORECASE)
     s = re.sub(r"_+", "_", s).strip("_")
     return s or "agent"
-
-
-def _summarize_room_objects(room_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
-    objects = []
-    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
-        value = room_plan.get(key)
-        if isinstance(value, list):
-            objects.extend(value)
-
-    summaries = []
-    for idx, obj in enumerate(objects):
-        if not isinstance(obj, dict):
-            continue
-        pos = obj.get("position") or obj.get("pos") or {}
-        if not isinstance(pos, dict):
-            continue
-        position = {"x": float(pos.get("x", 0.0)), "y": float(pos.get("y", 0.0)), "z": float(pos.get("z", 0.0))}
-        size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
-        radius = 0.4
-        if isinstance(size, dict):
-            sx = float(size.get("x", 0.0)) or 0.0
-            sz = float(size.get("z", 0.0)) or 0.0
-            radius = max(0.2, 0.5 * max(abs(sx), abs(sz)))
-        name = obj.get("name") or obj.get("id") or f"Objekt {idx+1}"
-        summaries.append({"id": str(obj.get("id") or f"obj_{idx+1}"), "name": str(name), "position": position, "radius": radius})
-
-    return summaries
 
 
 @dataclass
@@ -132,6 +105,7 @@ class ArrowProjectDraft:
     project: Dict[str, str]
     agents: List[Dict[str, Any]]
     knowledge: List[Dict[str, Any]]
+    placement_preview: Dict[str, Any]
     history: List[Dict[str, str]] = field(default_factory=list)
     created_ms: int = field(default_factory=_now_ms)
     updated_ms: int = field(default_factory=_now_ms)
@@ -511,6 +485,7 @@ class SessionStore:
             project=draft_payload["project"],
             agents=draft_payload["agents"],
             knowledge=draft_payload["knowledge"],
+            placement_preview=draft_payload["placement_preview"],
             history=[{"role": "assistant", "content": draft_payload["assistant_message"]}] if draft_payload["assistant_message"] else [],
         )
         self.arrow_sessions[session_id] = draft
@@ -536,6 +511,7 @@ class SessionStore:
         session.project = draft_payload["project"]
         session.agents = draft_payload["agents"]
         session.knowledge = draft_payload["knowledge"]
+        session.placement_preview = draft_payload["placement_preview"]
         session.history = history + (
             [{"role": "assistant", "content": draft_payload["assistant_message"]}]
             if draft_payload["assistant_message"]
@@ -605,7 +581,7 @@ class SessionStore:
             "status": "ok",
             "project": meta,
             "placements": placement_list,
-            "room_objects": _summarize_room_objects(session.arrow_payload),
+            "room_objects": summarize_room_objects(session.arrow_payload, floor_only=True),
         }
 
     def _generate_arrow_draft(
@@ -625,6 +601,7 @@ class SessionStore:
                     "project": current.project,
                     "agents": current.agents,
                     "knowledge": current.knowledge,
+                    "placement_preview": current.placement_preview,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -642,7 +619,12 @@ class SessionStore:
             "voice_style (z. B. klar, kreativ, präzise, warm, neutral) und tts_model. "
             "Verwende nach Möglichkeit folgende Stimm-IDs: weiblich = coral, nova, shimmer; "
             "männlich = alloy, verse, onyx, fable, echo. "
-            "Gib eine kurze assistant_message, die dem Nutzer die Analyse und evtl. Rückfragen zusammenfasst."
+            "Gib eine kurze assistant_message, die dem Nutzer die Analyse und evtl. Rückfragen zusammenfasst. "
+            "Erstelle zusätzlich eine placement_preview mit:\n"
+            "- room_objects: nur Objekte am Boden (y nahe 0) mit id, name, position (x,y,z) und radius.\n"
+            "- agent_placements: sinnvolle, kontextbezogene Agentenpositionen (x,y,z; y=0).\n"
+            "Achte darauf, dass Agenten nicht mit room_objects überlappen und untereinander "
+            "einen Mindestabstand halten. Verwende nur die MLDSI-Informationen für Objektlage."
             "\n\nMLDSI JSON:\n"
             f"{arrow_text}"
         )
@@ -675,11 +657,13 @@ class SessionStore:
                 temperature=self.temperature,
             )
 
-        return self._normalize_arrow_draft(parsed, fallback=current)
+        return self._normalize_arrow_draft(parsed, room_plan=arrow_payload, fallback=current)
 
     def _normalize_arrow_draft(
         self,
         parsed: Dict[str, Any],
+        *,
+        room_plan: Dict[str, Any],
         fallback: Optional[ArrowProjectDraft] = None,
     ) -> Dict[str, Any]:
         fallback_project = fallback.project if fallback else {}
@@ -754,6 +738,14 @@ class SessionStore:
             text = str(entry.get("text") or "").strip()
             knowledge.append({"tag": tag, "name": name, "text": text})
 
+        placement_preview_raw = parsed.get("placement_preview")
+        placement_preview_fallback = fallback.placement_preview if fallback else {}
+        placement_preview = normalize_placement_preview(
+            room_plan,
+            agents,
+            placement_preview_raw if isinstance(placement_preview_raw, dict) else placement_preview_fallback,
+        )
+
         return {
             "assistant_message": assistant_message,
             "analysis": analysis,
@@ -763,4 +755,5 @@ class SessionStore:
             },
             "agents": agents,
             "knowledge": knowledge,
+            "placement_preview": placement_preview,
         }

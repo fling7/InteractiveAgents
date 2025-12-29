@@ -13,6 +13,10 @@ def _distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> f
     return math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2)
 
 
+def _distance_xz(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
+    return math.sqrt((a[0]-b[0])**2 + (a[2]-b[2])**2)
+
+
 def _tokenize(text: str) -> List[str]:
     cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in text)
     return [tok for tok in cleaned.split() if len(tok) >= 3]
@@ -78,6 +82,197 @@ def _clamp_floor(position: Dict[str, Any]) -> Dict[str, Any]:
         "y": 0.0,
         "z": float(position.get("z", 0.0)),
     }
+
+
+def summarize_room_objects(
+    room_plan: Dict[str, Any],
+    *,
+    floor_only: bool = True,
+    floor_y_threshold: float = 0.3,
+) -> List[Dict[str, Any]]:
+    objects = []
+    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
+        value = room_plan.get(key)
+        if isinstance(value, list):
+            objects.extend(value)
+
+    summaries = []
+    for idx, obj in enumerate(objects):
+        if not isinstance(obj, dict):
+            continue
+        pos = obj.get("position") or obj.get("pos") or {}
+        if not isinstance(pos, dict):
+            continue
+        position = {"x": float(pos.get("x", 0.0)), "y": float(pos.get("y", 0.0)), "z": float(pos.get("z", 0.0))}
+        if floor_only and abs(position["y"]) > floor_y_threshold:
+            continue
+        size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
+        radius = 0.4
+        if isinstance(size, dict):
+            sx = float(size.get("x", 0.0)) or 0.0
+            sz = float(size.get("z", 0.0)) or 0.0
+            radius = max(0.2, 0.5 * max(abs(sx), abs(sz)))
+        name = obj.get("name") or obj.get("id") or f"Objekt {idx+1}"
+        summaries.append(
+            {
+                "id": str(obj.get("id") or f"obj_{idx+1}"),
+                "name": str(name),
+                "position": position,
+                "radius": radius,
+            }
+        )
+
+    return summaries
+
+
+def _room_objects_from_preview(preview_objects: Any) -> List[Dict[str, Any]]:
+    if not isinstance(preview_objects, list):
+        return []
+    summaries = []
+    for idx, obj in enumerate(preview_objects):
+        if not isinstance(obj, dict):
+            continue
+        pos = obj.get("position") or {}
+        if not isinstance(pos, dict):
+            continue
+        position = {
+            "x": float(pos.get("x", 0.0)),
+            "y": 0.0,
+            "z": float(pos.get("z", 0.0)),
+        }
+        radius = float(obj.get("radius", 0.4) or 0.4)
+        if radius <= 0:
+            radius = 0.4
+        summaries.append(
+            {
+                "id": str(obj.get("id") or f"obj_{idx+1}"),
+                "name": str(obj.get("name") or f"Objekt {idx+1}"),
+                "position": position,
+                "radius": radius,
+            }
+        )
+    return summaries
+
+
+def _agent_candidates_from_preview(preview_agents: Any) -> Dict[str, Dict[str, Any]]:
+    if not isinstance(preview_agents, list):
+        return {}
+    candidates: Dict[str, Dict[str, Any]] = {}
+    for entry in preview_agents:
+        if not isinstance(entry, dict):
+            continue
+        agent_id = entry.get("id")
+        if not isinstance(agent_id, str) or not agent_id:
+            continue
+        pos = entry.get("position") or {}
+        if not isinstance(pos, dict):
+            continue
+        position = {
+            "x": float(pos.get("x", 0.0)),
+            "y": 0.0,
+            "z": float(pos.get("z", 0.0)),
+        }
+        candidates[agent_id] = {
+            "id": agent_id,
+            "display_name": entry.get("display_name"),
+            "position": position,
+        }
+    return candidates
+
+
+def _find_open_position(
+    start: Tuple[float, float, float],
+    room_objects: Sequence[Dict[str, Any]],
+    placed: Sequence[Tuple[float, float, float]],
+    *,
+    min_spacing: float = 0.7,
+    object_padding: float = 0.4,
+    max_radius: float = 6.0,
+    step: float = 0.35,
+) -> Tuple[float, float, float]:
+    def blocked(candidate: Tuple[float, float, float]) -> bool:
+        for obj in room_objects:
+            pos = obj.get("position") or {}
+            if not isinstance(pos, dict):
+                continue
+            center = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
+            radius = float(obj.get("radius", 0.4) or 0.4)
+            if _distance_xz(candidate, center) < (radius + object_padding):
+                return True
+        for other in placed:
+            if _distance_xz(candidate, other) < min_spacing:
+                return True
+        return False
+
+    candidate = (start[0], 0.0, start[2])
+    if not blocked(candidate):
+        return candidate
+
+    radius = step
+    while radius <= max_radius:
+        for i in range(16):
+            angle = (2 * math.pi * i) / 16
+            candidate = (start[0] + radius * math.cos(angle), 0.0, start[2] + radius * math.sin(angle))
+            if not blocked(candidate):
+                return candidate
+        radius += step
+    return (start[0], 0.0, start[2])
+
+
+def normalize_placement_preview(
+    room_plan: Dict[str, Any],
+    agents: List[Dict[str, Any]],
+    preview: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    room_objects = _room_objects_from_preview(preview.get("room_objects") if isinstance(preview, dict) else None)
+    if not room_objects:
+        room_objects = summarize_room_objects(room_plan, floor_only=True)
+
+    candidates = _agent_candidates_from_preview(preview.get("agent_placements") if isinstance(preview, dict) else None)
+    placed_positions: List[Tuple[float, float, float]] = []
+    agent_placements = []
+
+    fallback_agents = []
+    for agent in agents:
+        agent_id = agent.get("id") if isinstance(agent, dict) else None
+        if not agent_id:
+            continue
+        candidate = candidates.get(agent_id)
+        if candidate and candidate.get("position"):
+            pos = candidate["position"]
+            start = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
+            resolved = _find_open_position(start, room_objects, placed_positions)
+            placed_positions.append(resolved)
+            agent_placements.append(
+                {
+                    "id": agent_id,
+                    "display_name": agent.get("display_name") or candidate.get("display_name") or agent_id,
+                    "position": {"x": round(resolved[0], 3), "y": 0.0, "z": round(resolved[2], 3)},
+                }
+            )
+        else:
+            fallback_agents.append(agent)
+
+    if fallback_agents:
+        fallback = assign_spawn_points(room_plan, fallback_agents)
+        for agent in fallback_agents:
+            agent_id = agent.get("id")
+            placement = fallback.get(agent_id) if agent_id else None
+            if not placement or not placement.get("position"):
+                continue
+            pos = placement["position"]
+            start = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
+            resolved = _find_open_position(start, room_objects, placed_positions)
+            placed_positions.append(resolved)
+            agent_placements.append(
+                {
+                    "id": agent_id,
+                    "display_name": agent.get("display_name") or agent_id,
+                    "position": {"x": round(resolved[0], 3), "y": 0.0, "z": round(resolved[2], 3)},
+                }
+            )
+
+    return {"room_objects": room_objects, "agent_placements": agent_placements}
 
 
 def _infer_preferences(room_plan: Dict[str, Any], agent: Dict[str, Any]) -> Tuple[List[str], List[str]]:

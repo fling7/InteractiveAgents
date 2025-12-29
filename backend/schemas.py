@@ -105,7 +105,59 @@ def arrow_project_schema() -> Dict:
                     "additionalProperties": False,
                 },
             },
+            "placement_preview": {
+                "type": "object",
+                "properties": {
+                    "room_objects": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "name": {"type": "string"},
+                                "position": {
+                                    "type": "object",
+                                    "properties": {
+                                        "x": {"type": "number"},
+                                        "y": {"type": "number"},
+                                        "z": {"type": "number"},
+                                    },
+                                    "required": ["x", "y", "z"],
+                                    "additionalProperties": False,
+                                },
+                                "radius": {"type": "number"},
+                            },
+                            "required": ["id", "name", "position", "radius"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "agent_placements": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "display_name": {"type": "string"},
+                                "position": {
+                                    "type": "object",
+                                    "properties": {
+                                        "x": {"type": "number"},
+                                        "y": {"type": "number"},
+                                        "z": {"type": "number"},
+                                    },
+                                    "required": ["x", "y", "z"],
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "required": ["id", "display_name", "position"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["room_objects", "agent_placements"],
+                "additionalProperties": False,
+            },
         },
-        "required": ["assistant_message", "analysis", "project", "agents", "knowledge"],
+        "required": ["assistant_message", "analysis", "project", "agents", "knowledge", "placement_preview"],
         "additionalProperties": False,
     }
