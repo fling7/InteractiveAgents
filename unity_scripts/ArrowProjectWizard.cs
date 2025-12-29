@@ -583,22 +583,29 @@ public class ArrowProjectWizard : EditorWindow
 
     private void NormalizeKnowledgeTags()
     {
-        if (draft?.knowledge == null || draft.agents == null)
+        if (draft?.agents == null)
         {
             return;
         }
 
-        var tagLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in draft.knowledge)
+        var knowledgeEntries = new List<KnowledgeEntry>();
+        if (draft.knowledge != null)
+        {
+            knowledgeEntries.AddRange(draft.knowledge);
+        }
+
+        var tagLookup = new Dictionary<string, KnowledgeEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in knowledgeEntries)
         {
             if (!string.IsNullOrEmpty(entry.tag) && !tagLookup.ContainsKey(entry.tag))
             {
-                tagLookup.Add(entry.tag, entry.tag);
+                tagLookup.Add(entry.tag, entry);
             }
         }
 
         foreach (var agent in draft.agents)
         {
+            agent.voice = "gpt-4o-mini-tts";
             if (agent.knowledge_tags == null)
             {
                 continue;
@@ -612,12 +619,25 @@ public class ArrowProjectWizard : EditorWindow
                     continue;
                 }
 
-                if (tagLookup.TryGetValue(tag, out var canonicalTag))
+                if (tagLookup.TryGetValue(tag, out var existingEntry))
                 {
-                    agent.knowledge_tags[i] = canonicalTag;
+                    agent.knowledge_tags[i] = existingEntry.tag;
+                    continue;
                 }
+
+                var newEntry = new KnowledgeEntry
+                {
+                    tag = tag,
+                    name = tag,
+                    text = ""
+                };
+                knowledgeEntries.Add(newEntry);
+                tagLookup.Add(tag, newEntry);
+                agent.knowledge_tags[i] = tag;
             }
         }
+
+        draft.knowledge = knowledgeEntries.ToArray();
     }
 
     private void DrawLoadingIndicator()
