@@ -368,12 +368,15 @@ public class QuickAgentManager : MonoBehaviour
             var id = string.IsNullOrEmpty(agent.id) ? $"agent_{i + 1}" : agent.id;
             var displayName = string.IsNullOrEmpty(agent.display_name) ? id : agent.display_name;
 
-            var pos = GetAgentSpawnPosition(agent);
+            var pos = new Vector3(
+                UnityEngine.Random.Range(-spawnArea.x * 0.5f, spawnArea.x * 0.5f),
+                spawnHeight,
+                UnityEngine.Random.Range(-spawnArea.z * 0.5f, spawnArea.z * 0.5f)
+            );
 
             var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
             cube.name = $"Agent_{displayName}";
             cube.transform.position = pos;
-            ApplyAgentForward(agent, cube.transform);
             var scale = UnityEngine.Random.Range(boxScaleRange.x, boxScaleRange.y);
             cube.transform.localScale = Vector3.one * scale;
 
@@ -399,36 +402,6 @@ public class QuickAgentManager : MonoBehaviour
         }
 
         UpdateAgentHighlights();
-    }
-
-    private Vector3 GetAgentSpawnPosition(AgentPlacement agent)
-    {
-        if (agent != null && agent.position != null)
-        {
-            return new Vector3(agent.position.x, agent.position.y, agent.position.z);
-        }
-
-        return new Vector3(
-            UnityEngine.Random.Range(-spawnArea.x * 0.5f, spawnArea.x * 0.5f),
-            spawnHeight,
-            UnityEngine.Random.Range(-spawnArea.z * 0.5f, spawnArea.z * 0.5f)
-        );
-    }
-
-    private void ApplyAgentForward(AgentPlacement agent, Transform target)
-    {
-        if (agent == null || target == null || agent.forward == null)
-        {
-            return;
-        }
-
-        var forward = new Vector3(agent.forward.x, agent.forward.y, agent.forward.z);
-        if (forward.sqrMagnitude <= 0.0001f)
-        {
-            return;
-        }
-
-        target.rotation = Quaternion.LookRotation(forward, Vector3.up);
     }
 
     private bool TryGetSelectPosition(out Vector2 screenPosition)
