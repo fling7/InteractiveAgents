@@ -43,6 +43,35 @@ public class ArrowProjectWizard : EditorWindow
     }
 
     [Serializable]
+    public class Vector3Data
+    {
+        public float x;
+        public float y;
+        public float z;
+    }
+
+    [Serializable]
+    public class PlacementSummary
+    {
+        public string id;
+        public string display_name;
+        public Vector3Data position;
+        public Vector3Data forward;
+        public string spawn_point_id;
+        public string zone_id;
+        public string[] tags;
+    }
+
+    [Serializable]
+    public class RoomObjectSummary
+    {
+        public string id;
+        public string name;
+        public Vector3Data position;
+        public float radius;
+    }
+
+    [Serializable]
     public class AgentSpec
     {
         public string id;
@@ -100,6 +129,8 @@ public class ArrowProjectWizard : EditorWindow
     {
         public string status;
         public ProjectMetadata project;
+        public PlacementSummary[] placements;
+        public RoomObjectSummary[] room_objects;
     }
 
     private class EditorCoroutine
@@ -175,6 +206,11 @@ public class ArrowProjectWizard : EditorWindow
     private bool isAnalyzing;
     private bool isChatting;
     private bool isCommitting;
+    private bool showPlacementStep;
+    private PlacementSummary[] placementSummaries;
+    private RoomObjectSummary[] roomObjectSummaries;
+    private string committedProjectId = "";
+    private Vector2 placementScroll;
 
     [MenuItem("Tools/MLDSI Project Wizard")]
     public static void ShowWindow()
@@ -241,6 +277,7 @@ public class ArrowProjectWizard : EditorWindow
         DrawDraft();
         DrawChat();
         DrawCommitSection();
+        DrawPlacementStep();
 
         EditorGUILayout.EndScrollView();
     }
@@ -406,6 +443,53 @@ public class ArrowProjectWizard : EditorWindow
         }
     }
 
+    private void DrawPlacementStep()
+    {
+        if (!showPlacementStep || placementSummaries == null || placementSummaries.Length == 0)
+        {
+            return;
+        }
+
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Agenten-Platzierung", EditorStyles.boldLabel);
+        if (!string.IsNullOrEmpty(committedProjectId))
+        {
+            EditorGUILayout.LabelField($"Projekt-ID: {committedProjectId}", EditorStyles.wordWrappedLabel);
+        }
+        EditorGUILayout.HelpBox(
+            "Die Agenten wurden anhand der MLDSI und der Agentenrollen platziert. "
+            + "Die Positionen wurden gespeichert und werden im Raum verwendet.",
+            MessageType.Info
+        );
+
+        placementScroll = EditorGUILayout.BeginScrollView(placementScroll, GUILayout.MinHeight(140));
+        foreach (var placement in placementSummaries)
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField($"{placement.display_name} ({placement.id})", EditorStyles.wordWrappedLabel);
+            if (placement.position != null)
+            {
+                EditorGUILayout.LabelField(
+                    "Position",
+                    $"x={placement.position.x:0.00}, y={placement.position.y:0.00}, z={placement.position.z:0.00}",
+                    EditorStyles.wordWrappedLabel
+                );
+            }
+            if (!string.IsNullOrEmpty(placement.zone_id))
+            {
+                EditorGUILayout.LabelField("Zone", placement.zone_id, EditorStyles.wordWrappedLabel);
+            }
+            if (placement.tags != null && placement.tags.Length > 0)
+            {
+                EditorGUILayout.LabelField("Tags", string.Join(", ", placement.tags), EditorStyles.wordWrappedLabel);
+            }
+            EditorGUILayout.EndVertical();
+        }
+        EditorGUILayout.EndScrollView();
+
+        DrawPlacementPreview();
+    }
+
     private void ResetState()
     {
         arrowFilePath = "";
@@ -421,6 +505,10 @@ public class ArrowProjectWizard : EditorWindow
         isAnalyzing = false;
         isChatting = false;
         isCommitting = false;
+        showPlacementStep = false;
+        placementSummaries = null;
+        roomObjectSummaries = null;
+        committedProjectId = "";
     }
 
     private void LoadArrowFile(string assetPath)
@@ -429,6 +517,7 @@ public class ArrowProjectWizard : EditorWindow
         arrowFilePath = fullPath;
         arrowJson = File.ReadAllText(fullPath, Encoding.UTF8);
         statusMessage = "MLDSI geladen.";
+        showPlacementStep = false;
     }
 
     private void StartAnalyze()
@@ -440,6 +529,7 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         statusMessage = "Analyse läuft...";
+        showPlacementStep = false;
         isAnalyzing = true;
         var payload = new AnalyzeRequest { arrow_json = arrowJson };
         var body = JsonUtility.ToJson(payload);
@@ -559,8 +649,11 @@ public class ArrowProjectWizard : EditorWindow
         statusMessage = response.project != null
             ? $"Projekt erstellt: {response.project.display_name} ({response.project.id})"
             : "Projekt erstellt.";
-        EditorUtility.DisplayDialog("Projekt gespeichert", "Alles wurde gespeichert.", "OK");
-        ResetState();
+        committedProjectId = response.project != null ? response.project.id : "";
+        placementSummaries = response.placements ?? Array.Empty<PlacementSummary>();
+        roomObjectSummaries = response.room_objects ?? Array.Empty<RoomObjectSummary>();
+        showPlacementStep = placementSummaries.Length > 0;
+        EditorUtility.DisplayDialog("Projekt gespeichert", "Alles wurde gespeichert. Agentenplatzierung wird angezeigt.", "OK");
     }
 
     private void SyncDraftFields()
@@ -657,6 +750,106 @@ public class ArrowProjectWizard : EditorWindow
         var loadingMessage = isCommitting ? "Speichert..." : "Warte auf Antwort...";
         EditorGUILayout.LabelField(loadingMessage, EditorStyles.wordWrappedLabel);
         Repaint();
+    }
+
+    private void DrawPlacementPreview()
+    {
+        const float previewSize = 260f;
+        var rect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.ExpandWidth(true));
+        EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
+
+        var positions = new List<Vector3Data>();
+        if (roomObjectSummaries != null)
+        {
+            foreach (var obj in roomObjectSummaries)
+            {
+                if (obj?.position != null)
+                {
+                    positions.Add(obj.position);
+                }
+            }
+        }
+        if (placementSummaries != null)
+        {
+            foreach (var placement in placementSummaries)
+            {
+                if (placement?.position != null)
+                {
+                    positions.Add(placement.position);
+                }
+            }
+        }
+
+        if (positions.Count == 0)
+        {
+            GUI.Label(rect, "Keine Platzierungsdaten verfügbar.", EditorStyles.centeredGreyMiniLabel);
+            return;
+        }
+
+        var minX = float.PositiveInfinity;
+        var maxX = float.NegativeInfinity;
+        var minZ = float.PositiveInfinity;
+        var maxZ = float.NegativeInfinity;
+        foreach (var pos in positions)
+        {
+            minX = Mathf.Min(minX, pos.x);
+            maxX = Mathf.Max(maxX, pos.x);
+            minZ = Mathf.Min(minZ, pos.z);
+            maxZ = Mathf.Max(maxZ, pos.z);
+        }
+
+        var spanX = Mathf.Max(1f, maxX - minX);
+        var spanZ = Mathf.Max(1f, maxZ - minZ);
+        var padding = 0.5f;
+        minX -= padding;
+        maxX += padding;
+        minZ -= padding;
+        maxZ += padding;
+        spanX = maxX - minX;
+        spanZ = maxZ - minZ;
+
+        var scale = Mathf.Min(rect.width / spanX, rect.height / spanZ);
+
+        Vector2 WorldToPreview(Vector3Data position)
+        {
+            var x = rect.x + (position.x - minX) * scale;
+            var z = rect.y + rect.height - (position.z - minZ) * scale;
+            return new Vector2(x, z);
+        }
+
+        Handles.BeginGUI();
+        if (roomObjectSummaries != null)
+        {
+            Handles.color = new Color(0.45f, 0.55f, 0.6f, 0.7f);
+            foreach (var obj in roomObjectSummaries)
+            {
+                if (obj?.position == null)
+                {
+                    continue;
+                }
+                var center = WorldToPreview(obj.position);
+                var radius = Mathf.Max(4f, obj.radius * scale);
+                Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, radius);
+            }
+        }
+
+        if (placementSummaries != null)
+        {
+            Handles.color = new Color(0.95f, 0.55f, 0.2f, 0.9f);
+            foreach (var placement in placementSummaries)
+            {
+                if (placement?.position == null)
+                {
+                    continue;
+                }
+                var center = WorldToPreview(placement.position);
+                Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, 5f);
+            }
+        }
+        Handles.EndGUI();
+
+        var legendRect = GUILayoutUtility.GetRect(rect.width, 18f);
+        EditorGUI.LabelField(legendRect, "Legende: Blau = Objekt, Orange = Agent", EditorStyles.miniLabel);
     }
 }
 #endif
