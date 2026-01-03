@@ -258,6 +258,11 @@ class SessionStore:
         voice = str(payload.get("voice") or "").strip() or "alloy"
         tts_model = str(payload.get("tts_model") or "").strip() or "gpt-4o-mini-tts"
         response_format = str(payload.get("response_format") or "mp3").strip() or "mp3"
+        print(
+            "[TTS] Anfrage vorbereiten: "
+            f"text_len={len(text)}, voice={voice}, model={tts_model}, format={response_format}",
+            flush=True,
+        )
         audio, content_type = create_tts_audio(
             api_key=self.openai.api_key,
             text=text,
@@ -265,6 +270,11 @@ class SessionStore:
             model=tts_model,
             response_format=response_format,
             timeout_seconds=self.openai.timeout_seconds,
+        )
+        print(
+            "[TTS] Antwort erhalten: "
+            f"bytes={len(audio)}, content_type={content_type}",
+            flush=True,
         )
         return audio, content_type
 

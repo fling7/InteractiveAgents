@@ -1145,17 +1145,20 @@ public class QuickAgentManager : MonoBehaviour
         var key = $"{agentId}::{text}";
         if (ttsCache.TryGetValue(key, out var cachedClip))
         {
+            Debug.Log($"[TTS] Cache hit für Agent {agentId} (text_len={text.Length}).");
             PlayAgentClip(agentId, cachedClip);
             yield break;
         }
 
         if (ttsInFlight.Contains(key))
         {
+            Debug.Log($"[TTS] Anfrage bereits in-flight für Agent {agentId} (text_len={text.Length}).");
             yield break;
         }
 
         if (IsTtsRateLimited(agentId))
         {
+            Debug.Log($"[TTS] Rate limit aktiv für Agent {agentId} (text_len={text.Length}).");
             yield break;
         }
 
@@ -1172,6 +1175,10 @@ public class QuickAgentManager : MonoBehaviour
         };
         var json = JsonUtility.ToJson(payload);
         var url = $"{backendBaseUrl}/tts";
+        Debug.Log(
+            "[TTS] Sende Anfrage: "
+            + $"agent={agentId}, text_len={text.Length}, voice={payload.voice}, model={payload.tts_model}"
+        );
 
         using (var req = new UnityWebRequest(url, "POST"))
         {
@@ -1187,6 +1194,7 @@ public class QuickAgentManager : MonoBehaviour
             {
                 statusMessage = "TTS fehlgeschlagen: " + req.error;
                 chatLog.Add(statusMessage + " | " + req.downloadHandler.text);
+                Debug.LogWarning($"[TTS] Fehler: agent={agentId}, error={req.error}");
                 yield break;
             }
 
@@ -1195,10 +1203,12 @@ public class QuickAgentManager : MonoBehaviour
             {
                 statusMessage = "TTS fehlgeschlagen: Kein AudioClip.";
                 chatLog.Add(statusMessage);
+                Debug.LogWarning($"[TTS] Kein AudioClip: agent={agentId}");
                 yield break;
             }
 
             ttsCache[key] = clip;
+            Debug.Log($"[TTS] AudioClip erhalten: agent={agentId}, length={clip.length:0.00}s");
             PlayAgentClip(agentId, clip);
         }
     }

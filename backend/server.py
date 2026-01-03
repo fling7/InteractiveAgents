@@ -145,7 +145,20 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                     out = store.chat(payload)
                     return self._send_json(200, out)
                 if path == "/tts":
+                    text_preview = str(payload.get("text") or "")
+                    text_len = len(text_preview.strip())
+                    voice = str(payload.get("voice") or "").strip() or "alloy"
+                    tts_model = str(payload.get("tts_model") or "").strip() or "gpt-4o-mini-tts"
+                    response_format = str(payload.get("response_format") or "mp3").strip() or "mp3"
+                    self._log_action(
+                        "TTS anfordern: "
+                        f"text_len={text_len}, voice={voice}, model={tts_model}, format={response_format}"
+                    )
                     audio, content_type = store.tts(payload)
+                    self._log_action(
+                        "TTS bereitgestellt: "
+                        f"bytes={len(audio)}, content_type={content_type}"
+                    )
                     return self._send_binary(200, audio, content_type)
                 if path == "/projects/create":
                     display_name = str(payload.get("display_name") or "").strip()
