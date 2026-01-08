@@ -115,9 +115,6 @@ def arrow_project_schema() -> Dict:
                             "properties": {
                                 "id": {"type": "string"},
                                 "name": {"type": "string"},
-                                "object_type": {"type": ["string", "null"]},
-                                "group": {"type": ["string", "null"]},
-                                "slice_height": {"type": ["number", "null"]},
                                 "position": {
                                     "type": "object",
                                     "properties": {
