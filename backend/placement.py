@@ -84,25 +84,22 @@ def _clamp_floor(position: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _collect_room_objects(room_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
-    objects: List[Dict[str, Any]] = []
-    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
-        value = room_plan.get(key)
-        if isinstance(value, list):
-            objects.extend([item for item in value if isinstance(item, dict)])
-    return objects
-
-
 def summarize_room_objects(
     room_plan: Dict[str, Any],
     *,
     floor_only: bool = True,
     floor_y_threshold: float = 0.3,
 ) -> List[Dict[str, Any]]:
-    objects = _collect_room_objects(room_plan)
+    objects = []
+    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
+        value = room_plan.get(key)
+        if isinstance(value, list):
+            objects.extend(value)
 
     summaries = []
     for idx, obj in enumerate(objects):
+        if not isinstance(obj, dict):
+            continue
         pos = obj.get("position") or obj.get("pos") or {}
         if not isinstance(pos, dict):
             continue
@@ -126,117 +123,6 @@ def summarize_room_objects(
         )
 
     return summaries
-
-
-def _object_bounds(obj: Dict[str, Any]) -> Tuple[float, float, float, float, float, float]:
-    pos = obj.get("position") or obj.get("pos") or {}
-    center = _vec3(pos) if isinstance(pos, dict) else (0.0, 0.0, 0.0)
-    size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
-    min_y = center[1] - 0.3
-    max_y = center[1] + 0.3
-    radius = 0.4
-    if isinstance(size, dict):
-        sx = float(size.get("x", 0.0)) or 0.0
-        sy = float(size.get("y", 0.0)) or 0.0
-        sz = float(size.get("z", 0.0)) or 0.0
-        if sy:
-            half_y = max(0.2, abs(sy) * 0.5)
-            min_y = center[1] - half_y
-            max_y = center[1] + half_y
-        if sx or sz:
-            radius = max(0.2, 0.5 * max(abs(sx), abs(sz)))
-
-    bbox = obj.get("bounds") or obj.get("bbox") or {}
-    if isinstance(bbox, dict):
-        bmin = bbox.get("min") or {}
-        bmax = bbox.get("max") or {}
-        if isinstance(bmin, dict) and isinstance(bmax, dict):
-            min_y = float(bmin.get("y", min_y))
-            max_y = float(bmax.get("y", max_y))
-            if "x" in bmin and "x" in bmax and "z" in bmin and "z" in bmax:
-                sx = abs(float(bmax.get("x", center[0])) - float(bmin.get("x", center[0])))
-                sz = abs(float(bmax.get("z", center[2])) - float(bmin.get("z", center[2])))
-                radius = max(radius, 0.5 * max(sx, sz))
-
-    return center[0], center[1], center[2], min_y, max_y, radius
-
-
-def _choose_slice_height(
-    objects: List[Dict[str, Any]],
-    *,
-    slice_thickness: float = 0.6,
-    floor_y_threshold: float = 0.05,
-) -> float:
-    if not objects:
-        return 1.0
-
-    candidates = []
-    for obj in objects:
-        _, y, _, min_y, max_y, _ = _object_bounds(obj)
-        if max_y <= floor_y_threshold:
-            continue
-        candidates.extend([y, (min_y + max_y) * 0.5])
-
-    if not candidates:
-        return 1.0
-
-    best_height = candidates[0]
-    best_score = -1
-    half_thickness = slice_thickness * 0.5
-    for height in candidates:
-        score = 0
-        for obj in objects:
-            _, _, _, min_y, max_y, _ = _object_bounds(obj)
-            if max_y <= floor_y_threshold:
-                continue
-            if min_y <= height + half_thickness and max_y >= height - half_thickness:
-                score += 1
-        if score > best_score or (score == best_score and height > best_height):
-            best_score = score
-            best_height = height
-
-    return max(best_height, floor_y_threshold + 0.1)
-
-
-def summarize_room_slice(
-    room_plan: Dict[str, Any],
-    *,
-    slice_height: Optional[float] = None,
-    slice_thickness: float = 0.6,
-    floor_y_threshold: float = 0.05,
-) -> Tuple[List[Dict[str, Any]], float]:
-    objects = _collect_room_objects(room_plan)
-    if slice_height is None:
-        slice_height = _choose_slice_height(
-            objects,
-            slice_thickness=slice_thickness,
-            floor_y_threshold=floor_y_threshold,
-        )
-
-    half_thickness = slice_thickness * 0.5
-    summaries: List[Dict[str, Any]] = []
-    for idx, obj in enumerate(objects):
-        if not isinstance(obj, dict):
-            continue
-        pos = obj.get("position") or obj.get("pos") or {}
-        if not isinstance(pos, dict):
-            continue
-        x, y, z, min_y, max_y, radius = _object_bounds(obj)
-        if max_y <= floor_y_threshold:
-            continue
-        if not (min_y <= slice_height + half_thickness and max_y >= slice_height - half_thickness):
-            continue
-        name = obj.get("name") or obj.get("id") or f"Objekt {idx+1}"
-        summaries.append(
-            {
-                "id": str(obj.get("id") or f"obj_{idx+1}"),
-                "name": str(name),
-                "position": {"x": float(x), "y": 0.0, "z": float(z)},
-                "radius": float(radius),
-            }
-        )
-
-    return summaries, slice_height
 
 
 def _room_objects_from_preview(preview_objects: Any) -> List[Dict[str, Any]]:
@@ -340,7 +226,7 @@ def normalize_placement_preview(
 ) -> Dict[str, Any]:
     room_objects = _room_objects_from_preview(preview.get("room_objects") if isinstance(preview, dict) else None)
     if not room_objects:
-        room_objects, _ = summarize_room_slice(room_plan)
+        room_objects = summarize_room_objects(room_plan, floor_only=True)
 
     candidates = _agent_candidates_from_preview(preview.get("agent_placements") if isinstance(preview, dict) else None)
     placed_positions: List[Tuple[float, float, float]] = []
