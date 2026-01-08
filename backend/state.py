@@ -100,6 +100,7 @@ class SessionState:
 class ArrowProjectDraft:
     session_id: str
     arrow_payload: Dict[str, Any]
+    slice_payload: Optional[Dict[str, Any]]
     analysis: str
     assistant_message: str
     project: Dict[str, str]
@@ -485,11 +486,28 @@ class SessionStore:
         if not isinstance(arrow_payload, dict):
             raise ValueError("arrow_json muss ein Objekt sein.")
 
-        draft_payload = self._generate_arrow_draft(arrow_payload, history=[])
+        slice_payload = payload.get("slice_json")
+        if isinstance(slice_payload, str):
+            if slice_payload.strip():
+                try:
+                    slice_payload = json.loads(slice_payload)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"slice_json ungültig: {exc}") from exc
+            else:
+                slice_payload = None
+        if slice_payload is not None and not isinstance(slice_payload, dict):
+            raise ValueError("slice_json muss ein Objekt sein.")
+        if isinstance(slice_payload, dict):
+            objects = slice_payload.get("objects") or slice_payload.get("slice_objects") or slice_payload.get("room_objects")
+            if objects is not None and not isinstance(objects, list):
+                raise ValueError("slice_json objects muss eine Liste sein.")
+
+        draft_payload = self._generate_arrow_draft(arrow_payload, slice_payload=slice_payload, history=[])
         session_id = str(uuid.uuid4())
         draft = ArrowProjectDraft(
             session_id=session_id,
             arrow_payload=arrow_payload,
+            slice_payload=slice_payload if isinstance(slice_payload, dict) else None,
             analysis=draft_payload["analysis"],
             assistant_message=draft_payload["assistant_message"],
             project=draft_payload["project"],
@@ -514,7 +532,7 @@ class SessionStore:
             raise ValueError("user_text ist leer.")
 
         history = session.history + [{"role": "user", "content": user_text}]
-        draft_payload = self._generate_arrow_draft(session.arrow_payload, history=history, current=session)
+        draft_payload = self._generate_arrow_draft(session.arrow_payload, slice_payload=session.slice_payload, history=history, current=session)
 
         session.analysis = draft_payload["analysis"]
         session.assistant_message = draft_payload["assistant_message"]
@@ -549,7 +567,12 @@ class SessionStore:
         meta = self.project_manager.create_project(display_name=display_name, project_id=project_id, description=description)
         project_id = meta["id"]
 
-        placement_preview = normalize_placement_preview(session.arrow_payload, session.agents, session.placement_preview)
+        placement_preview = normalize_placement_preview(
+            session.arrow_payload,
+            session.agents,
+            session.placement_preview,
+            slice_payload=session.slice_payload,
+        )
         placement_lookup = {}
         for placement in placement_preview.get("agent_placements") or []:
             if isinstance(placement, dict) and placement.get("id"):
@@ -603,12 +626,14 @@ class SessionStore:
     def _generate_arrow_draft(
         self,
         arrow_payload: Dict[str, Any],
+        slice_payload: Optional[Dict[str, Any]] = None,
         *,
         history: List[Dict[str, str]],
         current: Optional[ArrowProjectDraft] = None,
     ) -> Dict[str, Any]:
         schema = arrow_project_schema()
         arrow_text = json.dumps(arrow_payload, ensure_ascii=False, indent=2)
+        slice_text = json.dumps(slice_payload, ensure_ascii=False, indent=2) if slice_payload else ""
         current_summary = ""
         if current is not None:
             current_summary = json.dumps(
@@ -618,6 +643,7 @@ class SessionStore:
                     "agents": current.agents,
                     "knowledge": current.knowledge,
                     "placement_preview": current.placement_preview,
+                    "slice_payload": current.slice_payload,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -644,6 +670,13 @@ class SessionStore:
             "\n\nMLDSI JSON:\n"
             f"{arrow_text}"
         )
+        if slice_text:
+            dev_prompt += (
+                "\n\nSlice JSON (2D-Schnitt, für Objektlage/Platzierung):\n"
+                f"{slice_text}\n"
+                "Nutze den Slice als primäre Quelle für Objektpositionen und Beschreibungen. "
+                "Platziere Agenten explizit im 2D-Schnitt (y=0) mit Bezug zu den Slice-Objekten."
+            )
 
         input_msgs: List[Dict[str, Any]] = [{"role": "developer", "content": dev_prompt}]
         if current_summary:
@@ -673,7 +706,7 @@ class SessionStore:
                 temperature=self.temperature,
             )
 
-        return self._normalize_arrow_draft(parsed, room_plan=arrow_payload, fallback=current)
+        return self._normalize_arrow_draft(parsed, room_plan=arrow_payload, fallback=current, slice_payload=slice_payload)
 
     def _normalize_arrow_draft(
         self,
@@ -681,6 +714,7 @@ class SessionStore:
         *,
         room_plan: Dict[str, Any],
         fallback: Optional[ArrowProjectDraft] = None,
+        slice_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         fallback_project = fallback.project if fallback else {}
         fallback_agents = fallback.agents if fallback else []
@@ -762,6 +796,7 @@ class SessionStore:
             room_plan,
             agents,
             placement_preview_raw if isinstance(placement_preview_raw, dict) else placement_preview_fallback,
+            slice_payload=slice_payload,
         )
 
         return {

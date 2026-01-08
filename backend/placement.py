@@ -154,6 +154,39 @@ def _room_objects_from_preview(preview_objects: Any) -> List[Dict[str, Any]]:
     return summaries
 
 
+def _slice_objects_from_payload(slice_payload: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not isinstance(slice_payload, dict):
+        return []
+    objects = slice_payload.get("objects") or slice_payload.get("slice_objects") or slice_payload.get("room_objects")
+    if not isinstance(objects, list):
+        return []
+    summaries = []
+    for idx, obj in enumerate(objects):
+        if not isinstance(obj, dict):
+            continue
+        pos = obj.get("position") or obj.get("pos") or {}
+        if not isinstance(pos, dict):
+            continue
+        position = {
+            "x": float(pos.get("x", 0.0)),
+            "y": 0.0,
+            "z": float(pos.get("z", 0.0)),
+        }
+        radius = float(obj.get("radius", 0.4) or 0.4)
+        if radius <= 0:
+            radius = 0.4
+        name = obj.get("name") or obj.get("label") or obj.get("id") or f"Slice Objekt {idx+1}"
+        summaries.append(
+            {
+                "id": str(obj.get("id") or f"slice_obj_{idx+1}"),
+                "name": str(name),
+                "position": position,
+                "radius": radius,
+            }
+        )
+    return summaries
+
+
 def _agent_candidates_from_preview(preview_agents: Any) -> Dict[str, Dict[str, Any]]:
     if not isinstance(preview_agents, list):
         return {}
@@ -223,8 +256,12 @@ def normalize_placement_preview(
     room_plan: Dict[str, Any],
     agents: List[Dict[str, Any]],
     preview: Optional[Dict[str, Any]],
+    *,
+    slice_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     room_objects = _room_objects_from_preview(preview.get("room_objects") if isinstance(preview, dict) else None)
+    if not room_objects:
+        room_objects = _slice_objects_from_payload(slice_payload)
     if not room_objects:
         room_objects = summarize_room_objects(room_plan, floor_only=True)
 

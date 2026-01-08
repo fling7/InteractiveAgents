@@ -17,6 +17,7 @@ public class ArrowProjectWizard : EditorWindow
     public class AnalyzeRequest
     {
         public string arrow_json;
+        public string slice_json;
     }
 
     [Serializable]
@@ -198,7 +199,9 @@ public class ArrowProjectWizard : EditorWindow
     private string backendBaseUrl = DefaultBackendUrl;
 
     private string arrowFilePath = "";
+    private string sliceFilePath = "";
     private string arrowJson = "";
+    private string sliceJson = "";
     private string statusMessage = "";
     private string sessionId = "";
     private DraftResponse draft;
@@ -261,6 +264,15 @@ public class ArrowProjectWizard : EditorWindow
             EditorGUILayout.LabelField("Datei", arrowFilePath);
         }
 
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Slice-JSON (optional)", EditorStyles.boldLabel);
+        DrawSliceDropZone();
+
+        if (!string.IsNullOrEmpty(sliceFilePath))
+        {
+            EditorGUILayout.LabelField("Datei", sliceFilePath);
+        }
+
         EditorGUILayout.BeginHorizontal();
         if (GUILayout.Button("MLDSI analysieren", GUILayout.Height(28)))
         {
@@ -313,6 +325,41 @@ public class ArrowProjectWizard : EditorWindow
                         || path.EndsWith(".mldsi", StringComparison.OrdinalIgnoreCase))
                     {
                         LoadArrowFile(path);
+                        break;
+                    }
+                }
+            }
+            evt.Use();
+        }
+    }
+
+    private void DrawSliceDropZone()
+    {
+        var dropRect = GUILayoutUtility.GetRect(0f, 60f, GUILayout.ExpandWidth(true));
+        GUI.Box(dropRect, "Slice-JSON hierhin ziehen");
+
+        var evt = Event.current;
+        if (!dropRect.Contains(evt.mousePosition))
+        {
+            return;
+        }
+
+        if (evt.type == EventType.DragUpdated || evt.type == EventType.DragPerform)
+        {
+            DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+            if (evt.type == EventType.DragPerform)
+            {
+                DragAndDrop.AcceptDrag();
+                foreach (var obj in DragAndDrop.objectReferences)
+                {
+                    var path = AssetDatabase.GetAssetPath(obj);
+                    if (string.IsNullOrEmpty(path))
+                    {
+                        continue;
+                    }
+                    if (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        LoadSliceFile(path);
                         break;
                     }
                 }
@@ -458,7 +505,9 @@ public class ArrowProjectWizard : EditorWindow
     private void ResetState()
     {
         arrowFilePath = "";
+        sliceFilePath = "";
         arrowJson = "";
+        sliceJson = "";
         sessionId = "";
         draft = null;
         chatLog.Clear();
@@ -481,6 +530,14 @@ public class ArrowProjectWizard : EditorWindow
         statusMessage = "MLDSI geladen.";
     }
 
+    private void LoadSliceFile(string assetPath)
+    {
+        var fullPath = Path.GetFullPath(assetPath);
+        sliceFilePath = fullPath;
+        sliceJson = File.ReadAllText(fullPath, Encoding.UTF8);
+        statusMessage = "Slice-JSON geladen.";
+    }
+
     private void StartAnalyze()
     {
         if (string.IsNullOrEmpty(arrowJson))
@@ -491,7 +548,7 @@ public class ArrowProjectWizard : EditorWindow
 
         statusMessage = "Analyse läuft...";
         isAnalyzing = true;
-        var payload = new AnalyzeRequest { arrow_json = arrowJson };
+        var payload = new AnalyzeRequest { arrow_json = arrowJson, slice_json = sliceJson };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/analyze";
         ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnAnalyzeResponse, () => isAnalyzing = false)));
