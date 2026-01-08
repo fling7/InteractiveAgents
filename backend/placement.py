@@ -32,12 +32,18 @@ def _unique(seq: Iterable[str]) -> List[str]:
     return out
 
 
-def _extract_obstacle_bounds(room_plan: Dict[str, Any]) -> List[Tuple[float, float, float, float]]:
+def _extract_obstacle_bounds(
+    room_plan: Dict[str, Any],
+    slice_objects: Optional[Sequence[Dict[str, Any]]] = None,
+) -> List[Tuple[float, float, float, float]]:
     candidates = []
-    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
-        value = room_plan.get(key)
-        if isinstance(value, list):
-            candidates.extend(value)
+    if slice_objects:
+        candidates.extend([obj for obj in slice_objects if isinstance(obj, dict)])
+    else:
+        for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
+            value = room_plan.get(key)
+            if isinstance(value, list):
+                candidates.extend(value)
 
     bounds: List[Tuple[float, float, float, float]] = []
     for item in candidates:
@@ -47,8 +53,8 @@ def _extract_obstacle_bounds(room_plan: Dict[str, Any]) -> List[Tuple[float, flo
         center = _vec3(pos) if isinstance(pos, dict) else (0.0, 0.0, 0.0)
         size = item.get("size") or item.get("dimensions") or item.get("scale") or {}
         if isinstance(size, dict) and ("x" in size or "z" in size):
-            sx = float(size.get("x", 0.0)) or 0.0
-            sz = float(size.get("z", 0.0)) or 0.0
+            sx = float(size.get("x", size.get("width", 0.0)) or 0.0)
+            sz = float(size.get("z", size.get("depth", 0.0)) or 0.0)
             hx = abs(sx) * 0.5
             hz = abs(sz) * 0.5
             bounds.append((center[0] - hx, center[0] + hx, center[2] - hz, center[2] + hz))
@@ -89,12 +95,16 @@ def summarize_room_objects(
     *,
     floor_only: bool = True,
     floor_y_threshold: float = 0.3,
+    slice_objects: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     objects = []
-    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
-        value = room_plan.get(key)
-        if isinstance(value, list):
-            objects.extend(value)
+    if slice_objects:
+        objects.extend([obj for obj in slice_objects if isinstance(obj, dict)])
+    else:
+        for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
+            value = room_plan.get(key)
+            if isinstance(value, list):
+                objects.extend(value)
 
     summaries = []
     for idx, obj in enumerate(objects):
@@ -104,20 +114,27 @@ def summarize_room_objects(
         if not isinstance(pos, dict):
             continue
         position = {"x": float(pos.get("x", 0.0)), "y": float(pos.get("y", 0.0)), "z": float(pos.get("z", 0.0))}
-        if floor_only and abs(position["y"]) > floor_y_threshold:
+        if floor_only and not slice_objects and abs(position["y"]) > floor_y_threshold:
             continue
         size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
         radius = 0.4
         if isinstance(size, dict):
-            sx = float(size.get("x", 0.0)) or 0.0
-            sz = float(size.get("z", 0.0)) or 0.0
+            sx = float(size.get("x", size.get("width", 0.0)) or 0.0)
+            sz = float(size.get("z", size.get("depth", 0.0)) or 0.0)
             radius = max(0.2, 0.5 * max(abs(sx), abs(sz)))
-        name = obj.get("name") or obj.get("id") or f"Objekt {idx+1}"
+        name = (
+            obj.get("name")
+            or obj.get("specification")
+            or obj.get("objectType")
+            or obj.get("id")
+            or obj.get("objectId")
+            or f"Objekt {idx+1}"
+        )
         summaries.append(
             {
-                "id": str(obj.get("id") or f"obj_{idx+1}"),
+                "id": str(obj.get("id") or obj.get("objectId") or f"obj_{idx+1}"),
                 "name": str(name),
-                "position": position,
+                "position": {"x": position["x"], "y": 0.0, "z": position["z"]},
                 "radius": radius,
             }
         )
@@ -223,10 +240,11 @@ def normalize_placement_preview(
     room_plan: Dict[str, Any],
     agents: List[Dict[str, Any]],
     preview: Optional[Dict[str, Any]],
+    room_slice_objects: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     room_objects = _room_objects_from_preview(preview.get("room_objects") if isinstance(preview, dict) else None)
     if not room_objects:
-        room_objects = summarize_room_objects(room_plan, floor_only=True)
+        room_objects = summarize_room_objects(room_plan, floor_only=True, slice_objects=room_slice_objects)
 
     candidates = _agent_candidates_from_preview(preview.get("agent_placements") if isinstance(preview, dict) else None)
     placed_positions: List[Tuple[float, float, float]] = []
@@ -254,7 +272,7 @@ def normalize_placement_preview(
             fallback_agents.append(agent)
 
     if fallback_agents:
-        fallback = assign_spawn_points(room_plan, fallback_agents)
+        fallback = assign_spawn_points(room_plan, fallback_agents, room_slice_objects=room_slice_objects)
         for agent in fallback_agents:
             agent_id = agent.get("id")
             placement = fallback.get(agent_id) if agent_id else None
@@ -348,7 +366,12 @@ def suggest_agent_placements(
     return placements, enriched
 
 
-def assign_spawn_points(room_plan: Dict[str, Any], agents: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+def assign_spawn_points(
+    room_plan: Dict[str, Any],
+    agents: List[Dict[str, Any]],
+    *,
+    room_slice_objects: Optional[Sequence[Dict[str, Any]]] = None,
+) -> Dict[str, Dict[str, Any]]:
     """
     Greedy placement:
     - Prefer matching zone_id and tags
@@ -358,7 +381,7 @@ def assign_spawn_points(room_plan: Dict[str, Any], agents: List[Dict[str, Any]])
     """
     spawn_points = list(room_plan.get("spawn_points", []) or [])
     zones = {z.get("id"): z for z in (room_plan.get("zones", []) or [])}
-    obstacles = _extract_obstacle_bounds(room_plan)
+    obstacles = _extract_obstacle_bounds(room_plan, room_slice_objects)
 
     placements: Dict[str, Dict[str, Any]] = {}
     used_spawn_ids = set()
