@@ -84,22 +84,41 @@ def _clamp_floor(position: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _collect_room_objects(room_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    objects: List[Dict[str, Any]] = []
+    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
+        value = room_plan.get(key)
+        if isinstance(value, list):
+            objects.extend([item for item in value if isinstance(item, dict)])
+    scene = room_plan.get("scene")
+    if isinstance(scene, dict):
+        scene_objects = scene.get("objects")
+        if isinstance(scene_objects, list):
+            objects.extend([item for item in scene_objects if isinstance(item, dict)])
+    return objects
+
+
+def _object_identity(obj: Dict[str, Any]) -> Tuple[str, str]:
+    obj_id = str(obj.get("objectId") or obj.get("id") or "").strip()
+    obj_type = str(obj.get("objectType") or obj.get("type") or obj.get("name") or "").strip()
+    return obj_id, obj_type
+
+
+def _object_group(obj: Dict[str, Any]) -> str:
+    group = obj.get("group")
+    return str(group or "").strip().lower()
+
+
 def summarize_room_objects(
     room_plan: Dict[str, Any],
     *,
     floor_only: bool = True,
     floor_y_threshold: float = 0.3,
 ) -> List[Dict[str, Any]]:
-    objects = []
-    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
-        value = room_plan.get(key)
-        if isinstance(value, list):
-            objects.extend(value)
+    objects = _collect_room_objects(room_plan)
 
     summaries = []
     for idx, obj in enumerate(objects):
-        if not isinstance(obj, dict):
-            continue
         pos = obj.get("position") or obj.get("pos") or {}
         if not isinstance(pos, dict):
             continue
@@ -109,13 +128,16 @@ def summarize_room_objects(
         size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
         radius = 0.4
         if isinstance(size, dict):
-            sx = float(size.get("x", 0.0)) or 0.0
-            sz = float(size.get("z", 0.0)) or 0.0
+            sx = float(size.get("x", size.get("width", 0.0))) or 0.0
+            sz = float(size.get("z", size.get("depth", 0.0))) or 0.0
             radius = max(0.2, 0.5 * max(abs(sx), abs(sz)))
-        name = obj.get("name") or obj.get("id") or f"Objekt {idx+1}"
+        obj_id, obj_type = _object_identity(obj)
+        name = obj.get("name") or obj_type or obj_id or f"Objekt {idx+1}"
+        if obj_type and obj_id:
+            name = f"{obj_type}/{obj_id}"
         summaries.append(
             {
-                "id": str(obj.get("id") or f"obj_{idx+1}"),
+                "id": obj_id or f"obj_{idx+1}",
                 "name": str(name),
                 "position": position,
                 "radius": radius,
@@ -123,6 +145,165 @@ def summarize_room_objects(
         )
 
     return summaries
+
+
+def _object_bounds(obj: Dict[str, Any]) -> Tuple[float, float, float, float, float, float]:
+    pos = obj.get("position") or obj.get("pos") or {}
+    center = _vec3(pos) if isinstance(pos, dict) else (0.0, 0.0, 0.0)
+    size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
+    min_y = center[1] - 0.3
+    max_y = center[1] + 0.3
+    radius = 0.4
+    if isinstance(size, dict):
+        sx = float(size.get("x", size.get("width", 0.0))) or 0.0
+        sy = float(size.get("y", size.get("height", 0.0))) or 0.0
+        sz = float(size.get("z", size.get("depth", 0.0))) or 0.0
+        if sy:
+            half_y = max(0.2, abs(sy) * 0.5)
+            min_y = center[1] - half_y
+            max_y = center[1] + half_y
+        if sx or sz:
+            radius = max(0.2, 0.5 * max(abs(sx), abs(sz)))
+
+    bbox = obj.get("bounds") or obj.get("bbox") or {}
+    if isinstance(bbox, dict):
+        bmin = bbox.get("min") or {}
+        bmax = bbox.get("max") or {}
+        if isinstance(bmin, dict) and isinstance(bmax, dict):
+            min_y = float(bmin.get("y", min_y))
+            max_y = float(bmax.get("y", max_y))
+            if "x" in bmin and "x" in bmax and "z" in bmin and "z" in bmax:
+                sx = abs(float(bmax.get("x", center[0])) - float(bmin.get("x", center[0])))
+                sz = abs(float(bmax.get("z", center[2])) - float(bmin.get("z", center[2])))
+                radius = max(radius, 0.5 * max(sx, sz))
+
+    return center[0], center[1], center[2], min_y, max_y, radius
+
+
+def _floor_plane_y(objects: List[Dict[str, Any]]) -> float:
+    floor_candidates = []
+    for obj in objects:
+        obj_id, obj_type = _object_identity(obj)
+        group = _object_group(obj)
+        if obj_type == "floor" or obj_id == "floor" or group == "floor":
+            _, _, _, min_y, max_y, _ = _object_bounds(obj)
+            floor_candidates.append(max_y)
+    if floor_candidates:
+        return max(floor_candidates)
+    return 0.0
+
+
+def _is_structural(obj: Dict[str, Any]) -> bool:
+    obj_id, obj_type = _object_identity(obj)
+    group = _object_group(obj)
+    if obj_type in {"floor", "ceiling", "wall"}:
+        return True
+    if obj_id in {"floor", "ceiling"}:
+        return True
+    if group in {"structural", "floor"}:
+        return True
+    return False
+
+
+def _choose_slice_height(
+    objects: List[Dict[str, Any]],
+    *,
+    slice_thickness: float = 0.6,
+    floor_y_threshold: float = 0.05,
+) -> float:
+    if not objects:
+        return 1.0
+
+    base_height = floor_y_threshold + 0.2
+    half_thickness = slice_thickness * 0.5
+    base_hits = 0
+    for obj in objects:
+        if _is_structural(obj):
+            continue
+        _, _, _, min_y, max_y, _ = _object_bounds(obj)
+        if max_y <= floor_y_threshold:
+            continue
+        if min_y <= base_height + half_thickness and max_y >= base_height - half_thickness:
+            base_hits += 1
+    if base_hits > 0:
+        return base_height
+
+    candidates = []
+    for obj in objects:
+        if _is_structural(obj):
+            continue
+        _, y, _, min_y, max_y, _ = _object_bounds(obj)
+        if max_y <= floor_y_threshold:
+            continue
+        candidates.extend([y, (min_y + max_y) * 0.5])
+
+    if not candidates:
+        return base_height
+
+    best_height = candidates[0]
+    best_score = -1
+    for height in candidates:
+        score = 0
+        for obj in objects:
+            if _is_structural(obj):
+                continue
+            _, _, _, min_y, max_y, _ = _object_bounds(obj)
+            if max_y <= floor_y_threshold:
+                continue
+            if min_y <= height + half_thickness and max_y >= height - half_thickness:
+                score += 1
+        if score > best_score or (score == best_score and height > best_height):
+            best_score = score
+            best_height = height
+
+    return max(best_height, floor_y_threshold + 0.1)
+
+
+def summarize_room_slice(
+    room_plan: Dict[str, Any],
+    *,
+    slice_height: Optional[float] = None,
+    slice_thickness: float = 0.6,
+    floor_y_threshold: float = 0.05,
+) -> Tuple[List[Dict[str, Any]], float]:
+    objects = _collect_room_objects(room_plan)
+    if slice_height is None:
+        floor_y_threshold = max(floor_y_threshold, _floor_plane_y(objects))
+        slice_height = _choose_slice_height(
+            objects,
+            slice_thickness=slice_thickness,
+            floor_y_threshold=floor_y_threshold,
+        )
+
+    half_thickness = slice_thickness * 0.5
+    summaries: List[Dict[str, Any]] = []
+    for idx, obj in enumerate(objects):
+        if not isinstance(obj, dict):
+            continue
+        if _is_structural(obj):
+            continue
+        pos = obj.get("position") or obj.get("pos") or {}
+        if not isinstance(pos, dict):
+            continue
+        x, y, z, min_y, max_y, radius = _object_bounds(obj)
+        if max_y <= floor_y_threshold:
+            continue
+        if not (min_y <= slice_height + half_thickness and max_y >= slice_height - half_thickness):
+            continue
+        obj_id, obj_type = _object_identity(obj)
+        name = obj.get("name") or obj_type or obj_id or f"Objekt {idx+1}"
+        if obj_type and obj_id:
+            name = f"{obj_type}/{obj_id}"
+        summaries.append(
+            {
+                "id": obj_id or f"obj_{idx+1}",
+                "name": str(name),
+                "position": {"x": float(x), "y": 0.0, "z": float(z)},
+                "radius": float(radius),
+            }
+        )
+
+    return summaries, slice_height
 
 
 def _room_objects_from_preview(preview_objects: Any) -> List[Dict[str, Any]]:
@@ -226,7 +407,7 @@ def normalize_placement_preview(
 ) -> Dict[str, Any]:
     room_objects = _room_objects_from_preview(preview.get("room_objects") if isinstance(preview, dict) else None)
     if not room_objects:
-        room_objects = summarize_room_objects(room_plan, floor_only=True)
+        room_objects, _ = summarize_room_slice(room_plan)
 
     candidates = _agent_candidates_from_preview(preview.get("agent_placements") if isinstance(preview, dict) else None)
     placed_positions: List[Tuple[float, float, float]] = []
