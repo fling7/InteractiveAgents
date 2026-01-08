@@ -17,7 +17,6 @@ public class ArrowProjectWizard : EditorWindow
     public class AnalyzeRequest
     {
         public string arrow_json;
-        public SliceData slice;
     }
 
     [Serializable]
@@ -25,7 +24,6 @@ public class ArrowProjectWizard : EditorWindow
     {
         public string session_id;
         public string user_text;
-        public SliceData slice;
     }
 
     [Serializable]
@@ -50,23 +48,6 @@ public class ArrowProjectWizard : EditorWindow
         public float x;
         public float y;
         public float z;
-    }
-
-    [Serializable]
-    public class SliceData
-    {
-        public float y;
-        public SliceObject[] objects;
-    }
-
-    [Serializable]
-    public class SliceObject
-    {
-        public string id;
-        public string type;
-        public Vector3Data position;
-        public Vector3Data dimensions;
-        public string description;
     }
 
     [Serializable]
@@ -95,28 +76,6 @@ public class ArrowProjectWizard : EditorWindow
         public string name;
         public Vector3Data position;
         public float radius;
-    }
-
-    [Serializable]
-    private class MldsRoot
-    {
-        public MldsScene scene;
-    }
-
-    [Serializable]
-    private class MldsScene
-    {
-        public MldsObject[] objects;
-    }
-
-    [Serializable]
-    private class MldsObject
-    {
-        public string objectId;
-        public string objectType;
-        public Vector3Data position;
-        public Vector3Data dimensions;
-        public string specification;
     }
 
     [Serializable]
@@ -243,7 +202,6 @@ public class ArrowProjectWizard : EditorWindow
     private string statusMessage = "";
     private string sessionId = "";
     private DraftResponse draft;
-    private SliceData sliceData;
 
     private string chatInput = "";
     private readonly List<string> chatLog = new List<string>();
@@ -437,15 +395,15 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         if (draft.placement_preview != null
+            && draft.placement_preview.room_objects != null
             && draft.placement_preview.agent_placements != null)
         {
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Platzierungsvorschau (OpenAI)", EditorStyles.boldLabel);
             DrawPlacementPreview(
-                sliceData,
                 draft.placement_preview.room_objects,
                 draft.placement_preview.agent_placements,
-                "Legende: Blau = Objekt (Schnitt), Orange = Agent"
+                "Legende: Blau = Objekt, Orange = Agent"
             );
         }
     }
@@ -503,7 +461,6 @@ public class ArrowProjectWizard : EditorWindow
         arrowJson = "";
         sessionId = "";
         draft = null;
-        sliceData = null;
         chatLog.Clear();
         chatInput = "";
         projectDisplayName = "";
@@ -521,7 +478,6 @@ public class ArrowProjectWizard : EditorWindow
         var fullPath = Path.GetFullPath(assetPath);
         arrowFilePath = fullPath;
         arrowJson = File.ReadAllText(fullPath, Encoding.UTF8);
-        sliceData = BuildSliceData(arrowJson);
         statusMessage = "MLDSI geladen.";
     }
 
@@ -533,10 +489,9 @@ public class ArrowProjectWizard : EditorWindow
             return;
         }
 
-        sliceData ??= BuildSliceData(arrowJson);
         statusMessage = "Analyse läuft...";
         isAnalyzing = true;
-        var payload = new AnalyzeRequest { arrow_json = arrowJson, slice = sliceData };
+        var payload = new AnalyzeRequest { arrow_json = arrowJson };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/analyze";
         ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnAnalyzeResponse, () => isAnalyzing = false)));
@@ -554,7 +509,7 @@ public class ArrowProjectWizard : EditorWindow
         chatLog.Add("Du: " + message);
         statusMessage = "Chat läuft...";
         isChatting = true;
-        var payload = new ChatRequest { session_id = sessionId, user_text = message, slice = sliceData };
+        var payload = new ChatRequest { session_id = sessionId, user_text = message };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/chat";
         ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnChatResponse, () => isChatting = false)));
@@ -771,7 +726,6 @@ public class ArrowProjectWizard : EditorWindow
     }
 
     private void DrawPlacementPreview(
-        SliceData slice,
         RoomObjectSummary[] roomObjects,
         PlacementSummary[] placements,
         string legend
@@ -782,10 +736,9 @@ public class ArrowProjectWizard : EditorWindow
         EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
 
         var positions = new List<Vector3Data>();
-        var sliceObjects = slice?.objects;
-        if (sliceObjects != null)
+        if (roomObjects != null)
         {
-            foreach (var obj in sliceObjects)
+            foreach (var obj in roomObjects)
             {
                 if (obj?.position != null)
                 {
@@ -804,7 +757,7 @@ public class ArrowProjectWizard : EditorWindow
             }
         }
 
-        if (positions.Count == 0 && (roomObjects == null || roomObjects.Length == 0))
+        if (positions.Count == 0)
         {
             GUI.Label(rect, "Keine Platzierungsdaten verfügbar.", EditorStyles.centeredGreyMiniLabel);
             return;
@@ -814,36 +767,6 @@ public class ArrowProjectWizard : EditorWindow
         var maxX = float.NegativeInfinity;
         var minZ = float.PositiveInfinity;
         var maxZ = float.NegativeInfinity;
-        if (sliceObjects != null)
-        {
-            foreach (var obj in sliceObjects)
-            {
-                if (obj?.position == null)
-                {
-                    continue;
-                }
-                var halfWidth = Mathf.Max(0.1f, obj.dimensions?.x ?? 0.4f) * 0.5f;
-                var halfDepth = Mathf.Max(0.1f, obj.dimensions?.z ?? 0.4f) * 0.5f;
-                minX = Mathf.Min(minX, obj.position.x - halfWidth);
-                maxX = Mathf.Max(maxX, obj.position.x + halfWidth);
-                minZ = Mathf.Min(minZ, obj.position.z - halfDepth);
-                maxZ = Mathf.Max(maxZ, obj.position.z + halfDepth);
-            }
-        }
-        if (roomObjects != null)
-        {
-            foreach (var obj in roomObjects)
-            {
-                if (obj?.position == null)
-                {
-                    continue;
-                }
-                minX = Mathf.Min(minX, obj.position.x - obj.radius);
-                maxX = Mathf.Max(maxX, obj.position.x + obj.radius);
-                minZ = Mathf.Min(minZ, obj.position.z - obj.radius);
-                maxZ = Mathf.Max(maxZ, obj.position.z + obj.radius);
-            }
-        }
         foreach (var pos in positions)
         {
             minX = Mathf.Min(minX, pos.x);
@@ -872,39 +795,7 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         Handles.BeginGUI();
-        if (sliceObjects != null)
-        {
-            Handles.color = new Color(0.45f, 0.55f, 0.6f, 0.75f);
-            foreach (var obj in sliceObjects)
-            {
-                if (obj?.position == null)
-                {
-                    continue;
-                }
-                var width = Mathf.Max(0.1f, obj.dimensions?.x ?? 0.4f);
-                var depth = Mathf.Max(0.1f, obj.dimensions?.z ?? 0.4f);
-                var halfWidth = width * 0.5f;
-                var halfDepth = depth * 0.5f;
-                var corners = new Vector3[4];
-                var topLeft = new Vector2(obj.position.x - halfWidth, obj.position.z + halfDepth);
-                var topRight = new Vector2(obj.position.x + halfWidth, obj.position.z + halfDepth);
-                var bottomRight = new Vector2(obj.position.x + halfWidth, obj.position.z - halfDepth);
-                var bottomLeft = new Vector2(obj.position.x - halfWidth, obj.position.z - halfDepth);
-
-                var previewTopLeft = WorldToPreview(new Vector3Data { x = topLeft.x, z = topLeft.y });
-                var previewTopRight = WorldToPreview(new Vector3Data { x = topRight.x, z = topRight.y });
-                var previewBottomRight = WorldToPreview(new Vector3Data { x = bottomRight.x, z = bottomRight.y });
-                var previewBottomLeft = WorldToPreview(new Vector3Data { x = bottomLeft.x, z = bottomLeft.y });
-
-                corners[0] = new Vector3(previewTopLeft.x, previewTopLeft.y, 0f);
-                corners[1] = new Vector3(previewTopRight.x, previewTopRight.y, 0f);
-                corners[2] = new Vector3(previewBottomRight.x, previewBottomRight.y, 0f);
-                corners[3] = new Vector3(previewBottomLeft.x, previewBottomLeft.y, 0f);
-
-                Handles.DrawSolidRectangleWithOutline(corners, new Color(0.45f, 0.55f, 0.6f, 0.45f), Color.clear);
-            }
-        }
-        else if (roomObjects != null)
+        if (roomObjects != null)
         {
             Handles.color = new Color(0.45f, 0.55f, 0.6f, 0.7f);
             foreach (var obj in roomObjects)
@@ -936,82 +827,6 @@ public class ArrowProjectWizard : EditorWindow
 
         var legendRect = GUILayoutUtility.GetRect(rect.width, 18f);
         EditorGUI.LabelField(legendRect, legend, EditorStyles.miniLabel);
-    }
-
-    private SliceData BuildSliceData(string json)
-    {
-        if (string.IsNullOrEmpty(json))
-        {
-            return null;
-        }
-
-        MldsRoot parsed;
-        try
-        {
-            parsed = JsonUtility.FromJson<MldsRoot>(json);
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-
-        var objects = parsed?.scene?.objects;
-        if (objects == null || objects.Length == 0)
-        {
-            return null;
-        }
-
-        var floorTop = float.NaN;
-        var minY = float.PositiveInfinity;
-        foreach (var obj in objects)
-        {
-            if (obj?.position == null)
-            {
-                continue;
-            }
-
-            var halfHeight = Mathf.Max(0f, obj.dimensions?.y ?? 0f) * 0.5f;
-            minY = Mathf.Min(minY, obj.position.y - halfHeight);
-
-            if (string.Equals(obj.objectType, "floor", StringComparison.OrdinalIgnoreCase))
-            {
-                floorTop = obj.position.y + halfHeight;
-            }
-        }
-
-        var sliceHeight = !float.IsNaN(floorTop) ? floorTop + 0.05f : minY + 0.05f;
-        var sliceObjects = new List<SliceObject>();
-
-        foreach (var obj in objects)
-        {
-            if (obj?.position == null)
-            {
-                continue;
-            }
-
-            var halfHeight = Mathf.Max(0f, obj.dimensions?.y ?? 0f) * 0.5f;
-            var minObjY = obj.position.y - halfHeight;
-            var maxObjY = obj.position.y + halfHeight;
-            if (sliceHeight < minObjY || sliceHeight > maxObjY)
-            {
-                continue;
-            }
-
-            sliceObjects.Add(new SliceObject
-            {
-                id = string.IsNullOrEmpty(obj.objectId) ? obj.objectType : obj.objectId,
-                type = obj.objectType,
-                position = obj.position,
-                dimensions = obj.dimensions,
-                description = obj.specification
-            });
-        }
-
-        return new SliceData
-        {
-            y = sliceHeight,
-            objects = sliceObjects.ToArray()
-        };
     }
 }
 #endif
