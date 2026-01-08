@@ -17,6 +17,7 @@ public class ArrowProjectWizard : EditorWindow
     public class AnalyzeRequest
     {
         public string arrow_json;
+        public string slice_json;
     }
 
     [Serializable]
@@ -48,6 +49,76 @@ public class ArrowProjectWizard : EditorWindow
         public float x;
         public float y;
         public float z;
+    }
+
+    [Serializable]
+    public class DimensionsData
+    {
+        public float width;
+        public float height;
+        public float depth;
+        public float x;
+        public float y;
+        public float z;
+
+        public bool TryGetVector3(out Vector3 vector)
+        {
+            var widthDepthMagnitude = Mathf.Abs(width) + Mathf.Abs(height) + Mathf.Abs(depth);
+            var xyzMagnitude = Mathf.Abs(x) + Mathf.Abs(y) + Mathf.Abs(z);
+            if (widthDepthMagnitude > 0f)
+            {
+                vector = new Vector3(width, height, depth);
+                return true;
+            }
+            if (xyzMagnitude > 0f)
+            {
+                vector = new Vector3(x, y, z);
+                return true;
+            }
+            vector = Vector3.zero;
+            return false;
+        }
+    }
+
+    [Serializable]
+    public class MldsiScene
+    {
+        public MldsiObject[] objects;
+    }
+
+    [Serializable]
+    public class MldsiDocument
+    {
+        public MldsiScene scene;
+    }
+
+    [Serializable]
+    public class MldsiObject
+    {
+        public string objectId;
+        public string objectType;
+        public Vector3Data position;
+        public DimensionsData dimensions;
+        public DimensionsData size;
+        public DimensionsData scale;
+        public string specification;
+    }
+
+    [Serializable]
+    public class SliceDocument
+    {
+        public float slice_height;
+        public SliceObject[] objects;
+    }
+
+    [Serializable]
+    public class SliceObject
+    {
+        public string objectId;
+        public string objectType;
+        public Vector3Data position;
+        public DimensionsData dimensions;
+        public string specification;
     }
 
     [Serializable]
@@ -199,6 +270,7 @@ public class ArrowProjectWizard : EditorWindow
 
     private string arrowFilePath = "";
     private string arrowJson = "";
+    private string sliceJson = "";
     private string statusMessage = "";
     private string sessionId = "";
     private DraftResponse draft;
@@ -459,6 +531,7 @@ public class ArrowProjectWizard : EditorWindow
     {
         arrowFilePath = "";
         arrowJson = "";
+        sliceJson = "";
         sessionId = "";
         draft = null;
         chatLog.Clear();
@@ -478,7 +551,7 @@ public class ArrowProjectWizard : EditorWindow
         var fullPath = Path.GetFullPath(assetPath);
         arrowFilePath = fullPath;
         arrowJson = File.ReadAllText(fullPath, Encoding.UTF8);
-        statusMessage = "MLDSI geladen.";
+        GenerateSliceFromArrowJson();
     }
 
     private void StartAnalyze()
@@ -489,9 +562,13 @@ public class ArrowProjectWizard : EditorWindow
             return;
         }
 
+        if (string.IsNullOrEmpty(sliceJson))
+        {
+            GenerateSliceFromArrowJson();
+        }
         statusMessage = "Analyse läuft...";
         isAnalyzing = true;
-        var payload = new AnalyzeRequest { arrow_json = arrowJson };
+        var payload = new AnalyzeRequest { arrow_json = arrowJson, slice_json = sliceJson };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/analyze";
         ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnAnalyzeResponse, () => isAnalyzing = false)));
@@ -827,6 +904,154 @@ public class ArrowProjectWizard : EditorWindow
 
         var legendRect = GUILayoutUtility.GetRect(rect.width, 18f);
         EditorGUI.LabelField(legendRect, legend, EditorStyles.miniLabel);
+    }
+
+    private void GenerateSliceFromArrowJson()
+    {
+        sliceJson = "";
+        if (string.IsNullOrEmpty(arrowJson))
+        {
+            statusMessage = "MLDSI geladen, aber kein Inhalt gefunden.";
+            return;
+        }
+
+        MldsiDocument document = null;
+        try
+        {
+            document = JsonUtility.FromJson<MldsiDocument>(arrowJson);
+        }
+        catch (Exception)
+        {
+            statusMessage = "MLDSI konnte nicht gelesen werden.";
+            return;
+        }
+
+        var slice = BuildSlice(document);
+        if (slice == null)
+        {
+            statusMessage = "MLDSI geladen, aber kein Slice erstellt.";
+            return;
+        }
+
+        sliceJson = JsonUtility.ToJson(slice, true);
+        if (!string.IsNullOrEmpty(arrowFilePath))
+        {
+            var slicePath = Path.Combine(
+                Path.GetDirectoryName(arrowFilePath) ?? "",
+                Path.GetFileNameWithoutExtension(arrowFilePath) + ".slice.json"
+            );
+            File.WriteAllText(slicePath, sliceJson, Encoding.UTF8);
+        }
+        statusMessage = "MLDSI geladen und Slice gespeichert.";
+    }
+
+    private SliceDocument BuildSlice(MldsiDocument document)
+    {
+        var objects = document?.scene?.objects;
+        if (objects == null || objects.Length == 0)
+        {
+            return null;
+        }
+
+        float? floorMinY = null;
+        float? sceneMinY = null;
+
+        foreach (var obj in objects)
+        {
+            if (obj?.position == null)
+            {
+                continue;
+            }
+
+            if (!TryGetDimensions(obj, out var size))
+            {
+                continue;
+            }
+
+            var minY = obj.position.y - size.y * 0.5f;
+            sceneMinY = sceneMinY.HasValue ? Mathf.Min(sceneMinY.Value, minY) : minY;
+
+            if (!string.IsNullOrEmpty(obj.objectType)
+                && string.Equals(obj.objectType, "floor", StringComparison.OrdinalIgnoreCase))
+            {
+                floorMinY = floorMinY.HasValue ? Mathf.Min(floorMinY.Value, minY) : minY;
+            }
+        }
+
+        if (!sceneMinY.HasValue && !floorMinY.HasValue)
+        {
+            return null;
+        }
+
+        var floorY = floorMinY ?? sceneMinY.Value;
+        var sliceHeight = floorY + 0.05f;
+
+        var sliceObjects = new List<SliceObject>();
+        foreach (var obj in objects)
+        {
+            if (obj?.position == null)
+            {
+                continue;
+            }
+
+            if (!TryGetDimensions(obj, out var size))
+            {
+                continue;
+            }
+
+            var minY = obj.position.y - size.y * 0.5f;
+            var maxY = obj.position.y + size.y * 0.5f;
+            if (sliceHeight < minY || sliceHeight > maxY)
+            {
+                continue;
+            }
+
+            sliceObjects.Add(new SliceObject
+            {
+                objectId = obj.objectId,
+                objectType = obj.objectType,
+                position = obj.position,
+                dimensions = new DimensionsData
+                {
+                    width = size.x,
+                    height = size.y,
+                    depth = size.z
+                },
+                specification = obj.specification
+            });
+        }
+
+        return new SliceDocument
+        {
+            slice_height = sliceHeight,
+            objects = sliceObjects.ToArray()
+        };
+    }
+
+    private bool TryGetDimensions(MldsiObject obj, out Vector3 size)
+    {
+        size = Vector3.zero;
+        if (obj == null)
+        {
+            return false;
+        }
+
+        if (obj.dimensions != null && obj.dimensions.TryGetVector3(out size))
+        {
+            return true;
+        }
+
+        if (obj.size != null && obj.size.TryGetVector3(out size))
+        {
+            return true;
+        }
+
+        if (obj.scale != null && obj.scale.TryGetVector3(out size))
+        {
+            return true;
+        }
+
+        return false;
     }
 }
 #endif
