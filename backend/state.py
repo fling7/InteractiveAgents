@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .kb import KnowledgeBase
 from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_tts_audio
-from .placement import assign_spawn_points, normalize_placement_preview, summarize_room_objects
+from .placement import assign_spawn_points, normalize_placement_preview, summarize_room_slice
 from .projects import ProjectManager
 from .schemas import arrow_project_schema, npc_action_schema
 
@@ -597,7 +597,7 @@ class SessionStore:
             "status": "ok",
             "project": meta,
             "placements": placement_list,
-            "room_objects": placement_preview.get("room_objects") or summarize_room_objects(session.arrow_payload, floor_only=True),
+            "room_objects": placement_preview.get("room_objects") or summarize_room_slice(session.arrow_payload)[0],
         }
 
     def _generate_arrow_draft(
@@ -609,6 +609,15 @@ class SessionStore:
     ) -> Dict[str, Any]:
         schema = arrow_project_schema()
         arrow_text = json.dumps(arrow_payload, ensure_ascii=False, indent=2)
+        slice_objects, slice_height = summarize_room_slice(arrow_payload)
+        slice_payload = json.dumps(
+            {
+                "slice_height": round(slice_height, 3),
+                "room_objects": slice_objects,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
         current_summary = ""
         if current is not None:
             current_summary = json.dumps(
@@ -641,6 +650,8 @@ class SessionStore:
             "- agent_placements: sinnvolle, kontextbezogene Agentenpositionen (x,y,z; y=0).\n"
             "Achte darauf, dass Agenten nicht mit room_objects überlappen und untereinander "
             "einen Mindestabstand halten. Verwende nur die MLDSI-Informationen für Objektlage."
+            "\n\nRegelbasierter 2D-Schnitt der Szene (für die Platzierung nutzen, Kugeln = Objekte):\n"
+            f"{slice_payload}"
             "\n\nMLDSI JSON:\n"
             f"{arrow_text}"
         )
