@@ -100,7 +100,6 @@ class SessionState:
 class ArrowProjectDraft:
     session_id: str
     arrow_payload: Dict[str, Any]
-    room_slice: Optional[Dict[str, Any]]
     analysis: str
     assistant_message: str
     project: Dict[str, str]
@@ -486,21 +485,11 @@ class SessionStore:
         if not isinstance(arrow_payload, dict):
             raise ValueError("arrow_json muss ein Objekt sein.")
 
-        room_slice = payload.get("room_slice_json") or payload.get("slice_json")
-        if isinstance(room_slice, str):
-            try:
-                room_slice = json.loads(room_slice)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"room_slice_json ungültig: {exc}") from exc
-        if room_slice is not None and not isinstance(room_slice, dict):
-            raise ValueError("room_slice_json muss ein Objekt sein.")
-
-        draft_payload = self._generate_arrow_draft(arrow_payload, history=[], room_slice=room_slice)
+        draft_payload = self._generate_arrow_draft(arrow_payload, history=[])
         session_id = str(uuid.uuid4())
         draft = ArrowProjectDraft(
             session_id=session_id,
             arrow_payload=arrow_payload,
-            room_slice=room_slice,
             analysis=draft_payload["analysis"],
             assistant_message=draft_payload["assistant_message"],
             project=draft_payload["project"],
@@ -524,24 +513,8 @@ class SessionStore:
         if not user_text:
             raise ValueError("user_text ist leer.")
 
-        room_slice = payload.get("room_slice_json") or payload.get("slice_json")
-        if isinstance(room_slice, str):
-            try:
-                room_slice = json.loads(room_slice)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"room_slice_json ungültig: {exc}") from exc
-        if room_slice is not None:
-            if not isinstance(room_slice, dict):
-                raise ValueError("room_slice_json muss ein Objekt sein.")
-            session.room_slice = room_slice
-
         history = session.history + [{"role": "user", "content": user_text}]
-        draft_payload = self._generate_arrow_draft(
-            session.arrow_payload,
-            history=history,
-            current=session,
-            room_slice=session.room_slice,
-        )
+        draft_payload = self._generate_arrow_draft(session.arrow_payload, history=history, current=session)
 
         session.analysis = draft_payload["analysis"]
         session.assistant_message = draft_payload["assistant_message"]
@@ -576,12 +549,7 @@ class SessionStore:
         meta = self.project_manager.create_project(display_name=display_name, project_id=project_id, description=description)
         project_id = meta["id"]
 
-        placement_preview = normalize_placement_preview(
-            session.arrow_payload,
-            session.agents,
-            session.placement_preview,
-            room_slice_objects=(session.room_slice or {}).get("objects") if session.room_slice else None,
-        )
+        placement_preview = normalize_placement_preview(session.arrow_payload, session.agents, session.placement_preview)
         placement_lookup = {}
         for placement in placement_preview.get("agent_placements") or []:
             if isinstance(placement, dict) and placement.get("id"):
@@ -629,12 +597,7 @@ class SessionStore:
             "status": "ok",
             "project": meta,
             "placements": placement_list,
-            "room_objects": placement_preview.get("room_objects")
-            or summarize_room_objects(
-                session.arrow_payload,
-                floor_only=True,
-                slice_objects=(session.room_slice or {}).get("objects") if session.room_slice else None,
-            ),
+            "room_objects": placement_preview.get("room_objects") or summarize_room_objects(session.arrow_payload, floor_only=True),
         }
 
     def _generate_arrow_draft(
@@ -643,22 +606,9 @@ class SessionStore:
         *,
         history: List[Dict[str, str]],
         current: Optional[ArrowProjectDraft] = None,
-        room_slice: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         schema = arrow_project_schema()
         arrow_text = json.dumps(arrow_payload, ensure_ascii=False, indent=2)
-        slice_text = ""
-        if isinstance(room_slice, dict):
-            slice_objects = room_slice.get("objects")
-            if isinstance(slice_objects, list) and slice_objects:
-                slice_text = json.dumps(
-                    {
-                        "slice_height": room_slice.get("slice_height"),
-                        "objects": slice_objects,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
         current_summary = ""
         if current is not None:
             current_summary = json.dumps(
@@ -691,13 +641,6 @@ class SessionStore:
             "- agent_placements: sinnvolle, kontextbezogene Agentenpositionen (x,y,z; y=0).\n"
             "Achte darauf, dass Agenten nicht mit room_objects überlappen und untereinander "
             "einen Mindestabstand halten. Verwende nur die MLDSI-Informationen für Objektlage."
-            + (
-                "\n\nZusätzlicher 2D-Schnitt (Slice) der Raumobjekte. "
-                "Nutze diese Objektliste und Beschreibungen bevorzugt für die Platzierungsvorschau:\n"
-                f"{slice_text}"
-                if slice_text
-                else ""
-            )
             "\n\nMLDSI JSON:\n"
             f"{arrow_text}"
         )
@@ -819,7 +762,6 @@ class SessionStore:
             room_plan,
             agents,
             placement_preview_raw if isinstance(placement_preview_raw, dict) else placement_preview_fallback,
-            room_slice_objects=room_slice.get("objects") if isinstance(room_slice, dict) else None,
         )
 
         return {

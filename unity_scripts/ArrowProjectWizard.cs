@@ -18,7 +18,6 @@ public class ArrowProjectWizard : EditorWindow
     {
         public string arrow_json;
         public string slice_json;
-        public string room_slice_json;
     }
 
     [Serializable]
@@ -26,7 +25,6 @@ public class ArrowProjectWizard : EditorWindow
     {
         public string session_id;
         public string user_text;
-        public string room_slice_json;
     }
 
     [Serializable]
@@ -36,7 +34,6 @@ public class ArrowProjectWizard : EditorWindow
         public string display_name;
         public string project_id;
         public string description;
-        public string room_slice_json;
     }
 
     [Serializable]
@@ -571,12 +568,7 @@ public class ArrowProjectWizard : EditorWindow
         }
         statusMessage = "Analyse läuft...";
         isAnalyzing = true;
-        var payload = new AnalyzeRequest
-        {
-            arrow_json = arrowJson,
-            slice_json = sliceJson,
-            room_slice_json = sliceJson,
-        };
+        var payload = new AnalyzeRequest { arrow_json = arrowJson, slice_json = sliceJson };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/analyze";
         ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnAnalyzeResponse, () => isAnalyzing = false)));
@@ -594,12 +586,7 @@ public class ArrowProjectWizard : EditorWindow
         chatLog.Add("Du: " + message);
         statusMessage = "Chat läuft...";
         isChatting = true;
-        var payload = new ChatRequest
-        {
-            session_id = sessionId,
-            user_text = message,
-            room_slice_json = sliceJson,
-        };
+        var payload = new ChatRequest { session_id = sessionId, user_text = message };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/chat";
         ActiveCoroutines.Add(new EditorCoroutine(SendRequest(url, body, OnChatResponse, () => isChatting = false)));
@@ -621,7 +608,6 @@ public class ArrowProjectWizard : EditorWindow
             display_name = projectDisplayName,
             project_id = projectId,
             description = projectDescription,
-            room_slice_json = sliceJson,
         };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/commit";
