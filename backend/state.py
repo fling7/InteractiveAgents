@@ -609,6 +609,8 @@ class SessionStore:
     ) -> Dict[str, Any]:
         schema = arrow_project_schema()
         arrow_text = json.dumps(arrow_payload, ensure_ascii=False, indent=2)
+        floor_slice_objects = summarize_room_objects(arrow_payload, floor_only=True)
+        floor_slice_text = json.dumps(floor_slice_objects, ensure_ascii=False, indent=2)
         current_summary = ""
         if current is not None:
             current_summary = json.dumps(
@@ -630,6 +632,10 @@ class SessionStore:
             "Die Agentenauswahl soll sich am Raumtyp orientieren (z. B. Klassenraum -> Lehrer, Schüler, Rektor; "
             "Firmenpräsentation -> PR, Marketing, Vertrieb, Technik). Nutze die Raum-Beschreibung/Metadaten "
             "aus der MLDSI-Datei als primäre Leitlinie für Rollen, Ton und Expertise. "
+            "Die Projektbeschreibung darf nicht leer sein und soll den Raumtyp sowie die wichtigsten "
+            "Elemente der Szene zusammenfassen. "
+            "Die Wissenseinträge dürfen nicht leer sein; liefere mehrere, konkrete Einträge, die sich "
+            "auf Raum, Nutzung und auffällige Objekte beziehen. "
             "Gib außerdem für jeden Agenten passende Voice-Settings an: "
             "voice_gender (\"weiblich\" oder \"männlich\"), voice (Stimm-ID passend zum Geschlecht), "
             "voice_style (z. B. klar, kreativ, präzise, warm, neutral) und tts_model (gpt-4o-mini-tts). "
@@ -640,7 +646,11 @@ class SessionStore:
             "- room_objects: nur Objekte am Boden (y nahe 0) mit id, name, position (x,y,z) und radius.\n"
             "- agent_placements: sinnvolle, kontextbezogene Agentenpositionen (x,y,z; y=0).\n"
             "Achte darauf, dass Agenten nicht mit room_objects überlappen und untereinander "
-            "einen Mindestabstand halten. Verwende nur die MLDSI-Informationen für Objektlage."
+            "einen Mindestabstand halten. Verwende nur die MLDSI-Informationen für Objektlage. "
+            "Nutze den vorverarbeiteten 2D-Schnitt, um Agenten gezielt in der Nähe relevanter Objekte "
+            "zu platzieren (z. B. Lehrer nahe Tafel, Lesebereich nahe Sitzgelegenheiten)."
+            "\n\nVorverarbeiteter 2D-Schnitt knapp über dem Boden (Objekte, die den Schnitt schneiden):\n"
+            f"{floor_slice_text}"
             "\n\nMLDSI JSON:\n"
             f"{arrow_text}"
         )
@@ -675,6 +685,78 @@ class SessionStore:
 
         return self._normalize_arrow_draft(parsed, room_plan=arrow_payload, fallback=current)
 
+    def _fallback_project_description(self, room_plan: Dict[str, Any]) -> str:
+        scene = room_plan.get("scene") if isinstance(room_plan, dict) else {}
+        scene_name = ""
+        environment_type = ""
+        if isinstance(scene, dict):
+            scene_name = str(scene.get("sceneName") or "").strip()
+            environment = scene.get("environment") if isinstance(scene.get("environment"), dict) else {}
+            if isinstance(environment, dict):
+                environment_type = str(environment.get("type") or "").strip()
+        objects = summarize_room_objects(room_plan, floor_only=True)
+        object_names = []
+        for obj in objects:
+            name = str(obj.get("name") or "").strip()
+            if name and name not in object_names:
+                object_names.append(name)
+            if len(object_names) >= 6:
+                break
+        parts = []
+        if scene_name:
+            parts.append(scene_name)
+        if environment_type:
+            parts.append(environment_type)
+        heading = " / ".join(parts) if parts else "MLDSI-Szene"
+        details = f"Enthält Objekte wie {', '.join(object_names)}." if object_names else "Basierend auf der MLDSI-Szene."
+        return f"{heading}: {details}"
+
+    def _fallback_knowledge(self, room_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+        scene = room_plan.get("scene") if isinstance(room_plan, dict) else {}
+        scene_name = ""
+        environment_type = ""
+        if isinstance(scene, dict):
+            scene_name = str(scene.get("sceneName") or "").strip()
+            environment = scene.get("environment") if isinstance(scene.get("environment"), dict) else {}
+            if isinstance(environment, dict):
+                environment_type = str(environment.get("type") or "").strip()
+        objects = summarize_room_objects(room_plan, floor_only=True)
+        object_names = []
+        for obj in objects:
+            name = str(obj.get("name") or "").strip()
+            if name and name not in object_names:
+                object_names.append(name)
+            if len(object_names) >= 8:
+                break
+        knowledge = []
+        if scene_name or environment_type:
+            title = scene_name or "Raumkontext"
+            env_note = f" ({environment_type})" if environment_type else ""
+            knowledge.append(
+                {
+                    "tag": "raum",
+                    "name": title,
+                    "text": f"Kontext der Szene{env_note}: {title or 'MLDSI-Szene'}.",
+                }
+            )
+        if object_names:
+            knowledge.append(
+                {
+                    "tag": "objekte",
+                    "name": "Boden-Objekte",
+                    "text": "Wichtige Objekte im Raum: " + ", ".join(object_names) + ".",
+                }
+            )
+        if not knowledge:
+            knowledge.append(
+                {
+                    "tag": "hinweis",
+                    "name": "MLDSI",
+                    "text": "Nutze die MLDSI-Szene als primäre Quelle für Rollen, Wissen und Platzierung.",
+                }
+            )
+        return knowledge
+
     def _normalize_arrow_draft(
         self,
         parsed: Dict[str, Any],
@@ -692,6 +774,8 @@ class SessionStore:
         project_data = parsed.get("project") or {}
         display_name = str(project_data.get("display_name") or fallback_project.get("display_name") or "Neues Projekt").strip()
         description = str(project_data.get("description") or fallback_project.get("description") or "").strip()
+        if not description:
+            description = self._fallback_project_description(room_plan)
 
         agents_raw = parsed.get("agents")
         if not isinstance(agents_raw, list):
@@ -755,6 +839,8 @@ class SessionStore:
             name = str(entry.get("name") or "").strip()
             text = str(entry.get("text") or "").strip()
             knowledge.append({"tag": tag, "name": name, "text": text})
+        if not knowledge:
+            knowledge = self._fallback_knowledge(room_plan)
 
         placement_preview_raw = parsed.get("placement_preview")
         placement_preview_fallback = fallback.placement_preview if fallback else {}
