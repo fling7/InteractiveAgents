@@ -32,12 +32,22 @@ def _unique(seq: Iterable[str]) -> List[str]:
     return out
 
 
-def _extract_obstacle_bounds(room_plan: Dict[str, Any]) -> List[Tuple[float, float, float, float]]:
-    candidates = []
+def _collect_room_objects(room_plan: Dict[str, Any]) -> List[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
     for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
         value = room_plan.get(key)
         if isinstance(value, list):
-            candidates.extend(value)
+            candidates.extend([obj for obj in value if isinstance(obj, dict)])
+    scene = room_plan.get("scene")
+    if isinstance(scene, dict):
+        scene_objects = scene.get("objects")
+        if isinstance(scene_objects, list):
+            candidates.extend([obj for obj in scene_objects if isinstance(obj, dict)])
+    return candidates
+
+
+def _extract_obstacle_bounds(room_plan: Dict[str, Any]) -> List[Tuple[float, float, float, float]]:
+    candidates = _collect_room_objects(room_plan)
 
     bounds: List[Tuple[float, float, float, float]] = []
     for item in candidates:
@@ -46,9 +56,9 @@ def _extract_obstacle_bounds(room_plan: Dict[str, Any]) -> List[Tuple[float, flo
         pos = item.get("position") or item.get("pos") or {}
         center = _vec3(pos) if isinstance(pos, dict) else (0.0, 0.0, 0.0)
         size = item.get("size") or item.get("dimensions") or item.get("scale") or {}
-        if isinstance(size, dict) and ("x" in size or "z" in size):
-            sx = float(size.get("x", 0.0)) or 0.0
-            sz = float(size.get("z", 0.0)) or 0.0
+        if isinstance(size, dict) and ("x" in size or "z" in size or "width" in size or "depth" in size):
+            sx = float(size.get("x", size.get("width", 0.0)) or 0.0)
+            sz = float(size.get("z", size.get("depth", 0.0)) or 0.0)
             hx = abs(sx) * 0.5
             hz = abs(sz) * 0.5
             bounds.append((center[0] - hx, center[0] + hx, center[2] - hz, center[2] + hz))
@@ -89,12 +99,27 @@ def summarize_room_objects(
     *,
     floor_only: bool = True,
     floor_y_threshold: float = 0.3,
+    floor_slice_offset: float = 0.05,
 ) -> List[Dict[str, Any]]:
-    objects = []
-    for key in ("objects", "furniture", "props", "fixtures", "obstacles"):
-        value = room_plan.get(key)
-        if isinstance(value, list):
-            objects.extend(value)
+    objects = _collect_room_objects(room_plan)
+
+    floor_y = 0.0
+    for obj in objects:
+        obj_type = obj.get("objectType") or obj.get("type") or obj.get("object_type")
+        obj_id = obj.get("objectId") or obj.get("id")
+        group = obj.get("group")
+        if str(obj_type).lower() == "floor" or str(obj_id).lower() == "floor" or str(group).lower() == "floor":
+            pos = obj.get("position") or obj.get("pos") or {}
+            size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
+            if isinstance(pos, dict):
+                y = float(pos.get("y", 0.0))
+            else:
+                y = 0.0
+            height = 0.0
+            if isinstance(size, dict):
+                height = float(size.get("y", size.get("height", 0.0)) or 0.0)
+            floor_y = max(floor_y, y + 0.5 * abs(height))
+    slice_height = floor_y + floor_slice_offset
 
     summaries = []
     for idx, obj in enumerate(objects):
@@ -104,19 +129,41 @@ def summarize_room_objects(
         if not isinstance(pos, dict):
             continue
         position = {"x": float(pos.get("x", 0.0)), "y": float(pos.get("y", 0.0)), "z": float(pos.get("z", 0.0))}
-        if floor_only and abs(position["y"]) > floor_y_threshold:
-            continue
         size = obj.get("size") or obj.get("dimensions") or obj.get("scale") or {}
         radius = 0.4
+        bounds = None
+        height = 0.0
         if isinstance(size, dict):
-            sx = float(size.get("x", 0.0)) or 0.0
-            sz = float(size.get("z", 0.0)) or 0.0
+            sx = float(size.get("x", size.get("width", 0.0)) or 0.0)
+            sz = float(size.get("z", size.get("depth", 0.0)) or 0.0)
+            height = float(size.get("y", size.get("height", 0.0)) or 0.0)
             radius = max(0.2, 0.5 * max(abs(sx), abs(sz)))
-        name = obj.get("name") or obj.get("id") or f"Objekt {idx+1}"
+            if sx and sz:
+                hx = abs(sx) * 0.5
+                hz = abs(sz) * 0.5
+                bounds = {
+                    "min_x": position["x"] - hx,
+                    "max_x": position["x"] + hx,
+                    "min_z": position["z"] - hz,
+                    "max_z": position["z"] + hz,
+                }
+        if floor_only and height:
+            min_y = position["y"] - 0.5 * abs(height)
+            max_y = position["y"] + 0.5 * abs(height)
+            if not (min_y <= slice_height <= max_y):
+                continue
+        elif floor_only and abs(position["y"]) > floor_y_threshold:
+            continue
+        obj_id = obj.get("id") or obj.get("objectId") or f"obj_{idx+1}"
+        name = obj.get("name") or obj.get("objectType") or obj_id or f"Objekt {idx+1}"
         summaries.append(
             {
-                "id": str(obj.get("id") or f"obj_{idx+1}"),
+                "id": str(obj_id),
                 "name": str(name),
+                "object_type": obj.get("objectType") or obj.get("type") or obj.get("object_type"),
+                "group": obj.get("group"),
+                "slice_height": slice_height,
+                "bounds": bounds,
                 "position": position,
                 "radius": radius,
             }
@@ -147,11 +194,41 @@ def _room_objects_from_preview(preview_objects: Any) -> List[Dict[str, Any]]:
             {
                 "id": str(obj.get("id") or f"obj_{idx+1}"),
                 "name": str(obj.get("name") or f"Objekt {idx+1}"),
+                "object_type": obj.get("object_type"),
+                "group": obj.get("group"),
+                "slice_height": obj.get("slice_height"),
+                "bounds": obj.get("bounds"),
                 "position": position,
                 "radius": radius,
             }
         )
     return summaries
+
+
+def _merge_room_object_metadata(
+    preview_objects: List[Dict[str, Any]],
+    summarized_objects: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    summary_lookup = {obj.get("id"): obj for obj in summarized_objects if isinstance(obj, dict)}
+    merged = []
+    for obj in preview_objects:
+        if not isinstance(obj, dict):
+            continue
+        obj_id = obj.get("id")
+        summary = summary_lookup.get(obj_id)
+        if not summary:
+            merged.append(obj)
+            continue
+        merged.append(
+            {
+                **obj,
+                "object_type": obj.get("object_type") or summary.get("object_type"),
+                "group": obj.get("group") or summary.get("group"),
+                "slice_height": obj.get("slice_height") or summary.get("slice_height"),
+                "bounds": obj.get("bounds") or summary.get("bounds"),
+            }
+        )
+    return merged
 
 
 def _agent_candidates_from_preview(preview_agents: Any) -> Dict[str, Dict[str, Any]]:
@@ -196,6 +273,16 @@ def _find_open_position(
             if not isinstance(pos, dict):
                 continue
             center = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
+            bounds = obj.get("bounds")
+            if isinstance(bounds, dict):
+                min_x = float(bounds.get("min_x", center[0]))
+                max_x = float(bounds.get("max_x", center[0]))
+                min_z = float(bounds.get("min_z", center[2]))
+                max_z = float(bounds.get("max_z", center[2]))
+                if (min_x - object_padding) <= candidate[0] <= (max_x + object_padding) and (
+                    min_z - object_padding
+                ) <= candidate[2] <= (max_z + object_padding):
+                    return True
             radius = float(obj.get("radius", 0.4) or 0.4)
             if _distance_xz(candidate, center) < (radius + object_padding):
                 return True
@@ -224,9 +311,14 @@ def normalize_placement_preview(
     agents: List[Dict[str, Any]],
     preview: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    room_objects = _room_objects_from_preview(preview.get("room_objects") if isinstance(preview, dict) else None)
-    if not room_objects:
-        room_objects = summarize_room_objects(room_plan, floor_only=True)
+    preview_objects = _room_objects_from_preview(preview.get("room_objects") if isinstance(preview, dict) else None)
+    summarized_objects = summarize_room_objects(room_plan, floor_only=True)
+    if preview_objects:
+        placement_objects = preview_objects
+        room_objects = _merge_room_object_metadata(preview_objects, summarized_objects)
+    else:
+        placement_objects = summarized_objects
+        room_objects = summarized_objects
 
     candidates = _agent_candidates_from_preview(preview.get("agent_placements") if isinstance(preview, dict) else None)
     placed_positions: List[Tuple[float, float, float]] = []
@@ -241,7 +333,7 @@ def normalize_placement_preview(
         if candidate and candidate.get("position"):
             pos = candidate["position"]
             start = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
-            resolved = _find_open_position(start, room_objects, placed_positions)
+            resolved = _find_open_position(start, placement_objects, placed_positions)
             placed_positions.append(resolved)
             agent_placements.append(
                 {
@@ -262,7 +354,7 @@ def normalize_placement_preview(
                 continue
             pos = placement["position"]
             start = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
-            resolved = _find_open_position(start, room_objects, placed_positions)
+            resolved = _find_open_position(start, placement_objects, placed_positions)
             placed_positions.append(resolved)
             agent_placements.append(
                 {

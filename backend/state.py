@@ -609,6 +609,8 @@ class SessionStore:
     ) -> Dict[str, Any]:
         schema = arrow_project_schema()
         arrow_text = json.dumps(arrow_payload, ensure_ascii=False, indent=2)
+        floor_slice_objects = summarize_room_objects(arrow_payload, floor_only=True)
+        floor_slice_text = json.dumps(floor_slice_objects, ensure_ascii=False, indent=2)
         current_summary = ""
         if current is not None:
             current_summary = json.dumps(
@@ -641,6 +643,8 @@ class SessionStore:
             "- agent_placements: sinnvolle, kontextbezogene Agentenpositionen (x,y,z; y=0).\n"
             "Achte darauf, dass Agenten nicht mit room_objects überlappen und untereinander "
             "einen Mindestabstand halten. Verwende nur die MLDSI-Informationen für Objektlage."
+            "\n\nVorverarbeiteter 2D-Schnitt knapp über dem Boden (Objekte, die den Schnitt schneiden):\n"
+            f"{floor_slice_text}"
             "\n\nMLDSI JSON:\n"
             f"{arrow_text}"
         )
