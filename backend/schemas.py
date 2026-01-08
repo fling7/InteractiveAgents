@@ -115,20 +115,6 @@ def arrow_project_schema() -> Dict:
                             "properties": {
                                 "id": {"type": "string"},
                                 "name": {"type": "string"},
-                                "object_type": {"type": ["string", "null"]},
-                                "group": {"type": ["string", "null"]},
-                                "slice_height": {"type": ["number", "null"]},
-                                "bounds": {
-                                    "type": ["object", "null"],
-                                    "properties": {
-                                        "min_x": {"type": "number"},
-                                        "max_x": {"type": "number"},
-                                        "min_z": {"type": "number"},
-                                        "max_z": {"type": "number"},
-                                    },
-                                    "required": ["min_x", "max_x", "min_z", "max_z"],
-                                    "additionalProperties": False,
-                                },
                                 "position": {
                                     "type": "object",
                                     "properties": {
