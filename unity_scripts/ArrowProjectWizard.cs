@@ -199,6 +199,7 @@ public class ArrowProjectWizard : EditorWindow
 
     private string arrowFilePath = "";
     private string arrowJson = "";
+    private string sliceFilePath = "";
     private string statusMessage = "";
     private string sessionId = "";
     private DraftResponse draft;
@@ -471,6 +472,7 @@ public class ArrowProjectWizard : EditorWindow
         isChatting = false;
         isCommitting = false;
         committedProjectId = "";
+        sliceFilePath = "";
     }
 
     private void LoadArrowFile(string assetPath)
@@ -479,6 +481,7 @@ public class ArrowProjectWizard : EditorWindow
         arrowFilePath = fullPath;
         arrowJson = File.ReadAllText(fullPath, Encoding.UTF8);
         statusMessage = "MLDSI geladen.";
+        GenerateSlice(true);
     }
 
     private void StartAnalyze()
@@ -491,6 +494,7 @@ public class ArrowProjectWizard : EditorWindow
 
         statusMessage = "Analyse läuft...";
         isAnalyzing = true;
+        GenerateSlice(false);
         var payload = new AnalyzeRequest { arrow_json = arrowJson };
         var body = JsonUtility.ToJson(payload);
         var url = backendBaseUrl.TrimEnd('/') + "/projects/arrow/analyze";
@@ -704,6 +708,611 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         draft.knowledge = knowledgeEntries.ToArray();
+    }
+
+    [Serializable]
+    private class SliceObject
+    {
+        public string objectId;
+        public string objectType;
+        public Vector3Data position;
+        public Vector3Data dimensions;
+        public string specification;
+    }
+
+    [Serializable]
+    private class SliceData
+    {
+        public float slice_height;
+        public SliceObject[] objects;
+    }
+
+    private void GenerateSlice(bool showSuccessStatus)
+    {
+        if (string.IsNullOrEmpty(arrowJson) || string.IsNullOrEmpty(arrowFilePath))
+        {
+            return;
+        }
+
+        var parsed = MiniJson.Deserialize(arrowJson);
+        if (parsed == null)
+        {
+            statusMessage = "MLDSI konnte nicht geparst werden.";
+            return;
+        }
+
+        var objects = new List<ParsedObject>();
+        CollectObjects(parsed, objects);
+
+        if (objects.Count == 0)
+        {
+            statusMessage = "Keine Objektinformationen für Slice gefunden.";
+            return;
+        }
+
+        var floorY = FindFloorHeight(objects);
+        var sliceHeight = floorY + 0.05f;
+
+        var sliceObjects = new List<SliceObject>();
+        foreach (var obj in objects)
+        {
+            if (!IntersectsSlice(obj, sliceHeight))
+            {
+                continue;
+            }
+
+            sliceObjects.Add(new SliceObject
+            {
+                objectId = obj.ObjectId,
+                objectType = obj.ObjectType,
+                position = ToVector3Data(obj.Position),
+                dimensions = ToVector3Data(obj.Dimensions),
+                specification = obj.Specification
+            });
+        }
+
+        var sliceData = new SliceData
+        {
+            slice_height = sliceHeight,
+            objects = sliceObjects.ToArray()
+        };
+
+        var directory = Path.GetDirectoryName(arrowFilePath);
+        var filename = Path.GetFileNameWithoutExtension(arrowFilePath) + "_slice.json";
+        sliceFilePath = Path.Combine(directory ?? string.Empty, filename);
+        File.WriteAllText(sliceFilePath, JsonUtility.ToJson(sliceData, true), Encoding.UTF8);
+        if (showSuccessStatus)
+        {
+            statusMessage = $"Slice gespeichert: {sliceFilePath}";
+        }
+    }
+
+    private static Vector3Data ToVector3Data(Vector3 value)
+    {
+        return new Vector3Data { x = value.x, y = value.y, z = value.z };
+    }
+
+    private static float FindFloorHeight(List<ParsedObject> objects)
+    {
+        foreach (var obj in objects)
+        {
+            if (string.Equals(obj.ObjectType, "floor", StringComparison.OrdinalIgnoreCase))
+            {
+                return obj.Position.y;
+            }
+        }
+
+        var minY = float.PositiveInfinity;
+        foreach (var obj in objects)
+        {
+            minY = Mathf.Min(minY, obj.Position.y);
+        }
+
+        return float.IsPositiveInfinity(minY) ? 0f : minY;
+    }
+
+    private static bool IntersectsSlice(ParsedObject obj, float sliceHeight)
+    {
+        var halfHeight = Mathf.Abs(obj.Dimensions.y) * 0.5f;
+        var minY = obj.Position.y - halfHeight;
+        var maxY = obj.Position.y + halfHeight;
+        if (halfHeight <= 0f)
+        {
+            minY = obj.Position.y;
+            maxY = obj.Position.y;
+        }
+
+        return minY <= sliceHeight && maxY >= sliceHeight;
+    }
+
+    private class ParsedObject
+    {
+        public string ObjectId { get; }
+        public string ObjectType { get; }
+        public Vector3 Position { get; }
+        public Vector3 Dimensions { get; }
+        public string Specification { get; }
+
+        public ParsedObject(string objectId, string objectType, Vector3 position, Vector3 dimensions, string specification)
+        {
+            ObjectId = objectId;
+            ObjectType = objectType;
+            Position = position;
+            Dimensions = dimensions;
+            Specification = specification;
+        }
+    }
+
+    private static void CollectObjects(object node, List<ParsedObject> results)
+    {
+        if (node is Dictionary<string, object> dict)
+        {
+            if (TryParseObject(dict, out var parsed))
+            {
+                results.Add(parsed);
+            }
+
+            foreach (var value in dict.Values)
+            {
+                CollectObjects(value, results);
+            }
+            return;
+        }
+
+        if (node is List<object> list)
+        {
+            foreach (var item in list)
+            {
+                CollectObjects(item, results);
+            }
+        }
+    }
+
+    private static bool TryParseObject(Dictionary<string, object> dict, out ParsedObject parsed)
+    {
+        parsed = null;
+        if (!TryGetVector3(dict, new[] { "position" }, new[] { "x" }, new[] { "y" }, new[] { "z" }, out var position))
+        {
+            return false;
+        }
+
+        Vector3 dimensions = Vector3.zero;
+        if (TryGetValue(dict, "dimensions", out var dimensionsObj)
+            || TryGetValue(dict, "size", out dimensionsObj))
+        {
+            TryParseVector3(dimensionsObj, new[] { "w", "width", "x" }, new[] { "h", "height", "y" }, new[] { "d", "depth", "z" }, out dimensions);
+        }
+
+        var objectId = GetString(dict, "objectId", "object_id", "id");
+        var objectType = GetString(dict, "objectType", "type");
+        var specification = GetString(dict, "specification", "description");
+
+        parsed = new ParsedObject(
+            string.IsNullOrEmpty(objectId) ? Guid.NewGuid().ToString("N") : objectId,
+            string.IsNullOrEmpty(objectType) ? "unknown" : objectType,
+            position,
+            dimensions,
+            specification ?? string.Empty
+        );
+        return true;
+    }
+
+    private static bool TryGetVector3(
+        Dictionary<string, object> dict,
+        string[] containerKeys,
+        string[] xKeys,
+        string[] yKeys,
+        string[] zKeys,
+        out Vector3 value)
+    {
+        value = Vector3.zero;
+        foreach (var key in containerKeys)
+        {
+            if (!TryGetValue(dict, key, out var container))
+            {
+                continue;
+            }
+
+            if (TryParseVector3(container, xKeys, yKeys, zKeys, out value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryParseVector3(object value, string[] xKeys, string[] yKeys, string[] zKeys, out Vector3 vector)
+    {
+        vector = Vector3.zero;
+        if (value is Dictionary<string, object> dict)
+        {
+            vector = new Vector3(
+                GetFloat(dict, xKeys, 0f),
+                GetFloat(dict, yKeys, 0f),
+                GetFloat(dict, zKeys, 0f)
+            );
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryGetValue(Dictionary<string, object> dict, string key, out object value)
+    {
+        value = null;
+        return dict != null && dict.TryGetValue(key, out value);
+    }
+
+    private static string GetString(Dictionary<string, object> dict, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (dict != null && dict.TryGetValue(key, out var value) && value is string text)
+            {
+                return text;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static float GetFloat(Dictionary<string, object> dict, string[] keys, float fallback)
+    {
+        foreach (var key in keys)
+        {
+            if (dict != null && dict.TryGetValue(key, out var value) && TryConvertToFloat(value, out var number))
+            {
+                return number;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static bool TryConvertToFloat(object value, out float number)
+    {
+        switch (value)
+        {
+            case float f:
+                number = f;
+                return true;
+            case double d:
+                number = (float)d;
+                return true;
+            case int i:
+                number = i;
+                return true;
+            case long l:
+                number = l;
+                return true;
+            case string s when float.TryParse(s, out var parsed):
+                number = parsed;
+                return true;
+            default:
+                number = 0f;
+                return false;
+        }
+    }
+
+    private static class MiniJson
+    {
+        public static object Deserialize(string json)
+        {
+            if (string.IsNullOrEmpty(json))
+            {
+                return null;
+            }
+
+            return Parser.Parse(json);
+        }
+
+        private sealed class Parser : IDisposable
+        {
+            private readonly StringReader reader;
+
+            private Parser(string jsonString)
+            {
+                reader = new StringReader(jsonString);
+            }
+
+            public static object Parse(string jsonString)
+            {
+                using (var instance = new Parser(jsonString))
+                {
+                    return instance.ParseValue();
+                }
+            }
+
+            public void Dispose()
+            {
+                reader.Dispose();
+            }
+
+            private Dictionary<string, object> ParseObject()
+            {
+                var table = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+                reader.Read();
+
+                while (true)
+                {
+                    switch (NextToken)
+                    {
+                        case Token.None:
+                            return null;
+                        case Token.CurlyClose:
+                            reader.Read();
+                            return table;
+                        default:
+                            var name = ParseString();
+                            if (name == null)
+                            {
+                                return null;
+                            }
+
+                            if (NextToken != Token.Colon)
+                            {
+                                return null;
+                            }
+
+                            reader.Read();
+                            table[name] = ParseValue();
+                            break;
+                    }
+                }
+            }
+
+            private List<object> ParseArray()
+            {
+                var array = new List<object>();
+
+                reader.Read();
+
+                var parsing = true;
+                while (parsing)
+                {
+                    var token = NextToken;
+
+                    switch (token)
+                    {
+                        case Token.None:
+                            return null;
+                        case Token.SquaredClose:
+                            reader.Read();
+                            parsing = false;
+                            break;
+                        default:
+                            array.Add(ParseValue());
+                            break;
+                    }
+                }
+
+                return array;
+            }
+
+            private object ParseValue()
+            {
+                switch (NextToken)
+                {
+                    case Token.String:
+                        return ParseString();
+                    case Token.Number:
+                        return ParseNumber();
+                    case Token.CurlyOpen:
+                        return ParseObject();
+                    case Token.SquaredOpen:
+                        return ParseArray();
+                    case Token.True:
+                        reader.Read();
+                        return true;
+                    case Token.False:
+                        reader.Read();
+                        return false;
+                    case Token.Null:
+                        reader.Read();
+                        return null;
+                    default:
+                        return null;
+                }
+            }
+
+            private string ParseString()
+            {
+                var builder = new StringBuilder();
+                reader.Read();
+
+                var parsing = true;
+                while (parsing)
+                {
+                    if (reader.Peek() == -1)
+                    {
+                        break;
+                    }
+
+                    var c = NextChar;
+                    switch (c)
+                    {
+                        case '"':
+                            parsing = false;
+                            break;
+                        case '\\':
+                            if (reader.Peek() == -1)
+                            {
+                                parsing = false;
+                                break;
+                            }
+
+                            var escaped = NextChar;
+                            switch (escaped)
+                            {
+                                case '"':
+                                case '\\':
+                                case '/':
+                                    builder.Append(escaped);
+                                    break;
+                                case 'b':
+                                    builder.Append('\b');
+                                    break;
+                                case 'f':
+                                    builder.Append('\f');
+                                    break;
+                                case 'n':
+                                    builder.Append('\n');
+                                    break;
+                                case 'r':
+                                    builder.Append('\r');
+                                    break;
+                                case 't':
+                                    builder.Append('\t');
+                                    break;
+                                case 'u':
+                                    var unicode = new char[4];
+                                    for (var i = 0; i < 4; i++)
+                                    {
+                                        unicode[i] = NextChar;
+                                    }
+                                    builder.Append((char)Convert.ToInt32(new string(unicode), 16));
+                                    break;
+                            }
+                            break;
+                        default:
+                            builder.Append(c);
+                            break;
+                    }
+                }
+
+                return builder.ToString();
+            }
+
+            private object ParseNumber()
+            {
+                var number = NextWord;
+                if (number.IndexOf('.') != -1 || number.IndexOf('e') != -1 || number.IndexOf('E') != -1)
+                {
+                    if (double.TryParse(number, out var parsedDouble))
+                    {
+                        return parsedDouble;
+                    }
+                }
+
+                if (long.TryParse(number, out var parsedLong))
+                {
+                    return parsedLong;
+                }
+
+                return 0;
+            }
+
+            private void EatWhitespace()
+            {
+                while (char.IsWhiteSpace(PeekChar))
+                {
+                    reader.Read();
+                    if (reader.Peek() == -1)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            private char PeekChar => Convert.ToChar(reader.Peek());
+
+            private char NextChar => Convert.ToChar(reader.Read());
+
+            private string NextWord
+            {
+                get
+                {
+                    var builder = new StringBuilder();
+                    while (!IsWordBreak(PeekChar))
+                    {
+                        builder.Append(NextChar);
+                        if (reader.Peek() == -1)
+                        {
+                            break;
+                        }
+                    }
+                    return builder.ToString();
+                }
+            }
+
+            private Token NextToken
+            {
+                get
+                {
+                    EatWhitespace();
+                    if (reader.Peek() == -1)
+                    {
+                        return Token.None;
+                    }
+
+                    switch (PeekChar)
+                    {
+                        case '{':
+                            return Token.CurlyOpen;
+                        case '}':
+                            return Token.CurlyClose;
+                        case '[':
+                            return Token.SquaredOpen;
+                        case ']':
+                            return Token.SquaredClose;
+                        case ',':
+                            reader.Read();
+                            return NextToken;
+                        case '"':
+                            return Token.String;
+                        case ':':
+                            return Token.Colon;
+                        case '0':
+                        case '1':
+                        case '2':
+                        case '3':
+                        case '4':
+                        case '5':
+                        case '6':
+                        case '7':
+                        case '8':
+                        case '9':
+                        case '-':
+                            return Token.Number;
+                    }
+
+                    var word = NextWord;
+                    switch (word)
+                    {
+                        case "false":
+                            return Token.False;
+                        case "true":
+                            return Token.True;
+                        case "null":
+                            return Token.Null;
+                    }
+
+                    return Token.None;
+                }
+            }
+
+            private static bool IsWordBreak(char c)
+            {
+                return char.IsWhiteSpace(c) || c == ',' || c == ':' || c == ']' || c == '}';
+            }
+
+            private enum Token
+            {
+                None,
+                CurlyOpen,
+                CurlyClose,
+                SquaredOpen,
+                SquaredClose,
+                Colon,
+                String,
+                Number,
+                True,
+                False,
+                Null
+            }
+        }
     }
 
     private void DrawLoadingIndicator()
