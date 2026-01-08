@@ -51,6 +51,51 @@ public class ArrowProjectWizard : EditorWindow
     }
 
     [Serializable]
+    public class SliceDimensions
+    {
+        public float width;
+        public float depth;
+        public float height;
+    }
+
+    [Serializable]
+    public class SliceSpecification
+    {
+        public string id;
+        public string name;
+        public string category;
+    }
+
+    [Serializable]
+    public class SliceObject
+    {
+        public string objectId;
+        public Vector3Data position;
+        public SliceDimensions dimensions;
+        public SliceSpecification specification;
+        public Vector3Data size;
+    }
+
+    [Serializable]
+    private class SliceCollection
+    {
+        public SliceObject[] slices;
+        public SliceObject[] objects;
+        public SliceObject[] items;
+    }
+
+    [Serializable]
+    private class ArrowPayload
+    {
+        public string slice_json;
+        public string sliceJson;
+        public SliceObject[] slices;
+        public SliceObject[] slice_objects;
+        public SliceObject[] sliceObjects;
+        public SliceCollection slice;
+    }
+
+    [Serializable]
     public class PlacementSummary
     {
         public string id;
@@ -202,6 +247,7 @@ public class ArrowProjectWizard : EditorWindow
     private string statusMessage = "";
     private string sessionId = "";
     private DraftResponse draft;
+    private List<SliceObject> sliceObjects = new List<SliceObject>();
 
     private string chatInput = "";
     private readonly List<string> chatLog = new List<string>();
@@ -395,16 +441,26 @@ public class ArrowProjectWizard : EditorWindow
         }
 
         if (draft.placement_preview != null
-            && draft.placement_preview.room_objects != null
             && draft.placement_preview.agent_placements != null)
         {
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Platzierungsvorschau (OpenAI)", EditorStyles.boldLabel);
-            DrawPlacementPreview(
-                draft.placement_preview.room_objects,
-                draft.placement_preview.agent_placements,
-                "Legende: Blau = Objekt, Orange = Agent"
-            );
+            if (sliceObjects != null && sliceObjects.Count > 0)
+            {
+                DrawSlicePreview(
+                    sliceObjects,
+                    draft.placement_preview.agent_placements,
+                    "Legende: Blau/Grau = Slice-Objekt, Orange = Agent"
+                );
+            }
+            else
+            {
+                DrawPlacementPreview(
+                    draft.placement_preview.room_objects,
+                    draft.placement_preview.agent_placements,
+                    "Legende: Blau = Objekt, Orange = Agent"
+                );
+            }
         }
     }
 
@@ -461,6 +517,7 @@ public class ArrowProjectWizard : EditorWindow
         arrowJson = "";
         sessionId = "";
         draft = null;
+        sliceObjects.Clear();
         chatLog.Clear();
         chatInput = "";
         projectDisplayName = "";
@@ -478,6 +535,7 @@ public class ArrowProjectWizard : EditorWindow
         var fullPath = Path.GetFullPath(assetPath);
         arrowFilePath = fullPath;
         arrowJson = File.ReadAllText(fullPath, Encoding.UTF8);
+        LoadSliceObjects();
         statusMessage = "MLDSI geladen.";
     }
 
@@ -827,6 +885,280 @@ public class ArrowProjectWizard : EditorWindow
 
         var legendRect = GUILayoutUtility.GetRect(rect.width, 18f);
         EditorGUI.LabelField(legendRect, legend, EditorStyles.miniLabel);
+    }
+
+    private void DrawSlicePreview(
+        List<SliceObject> slices,
+        PlacementSummary[] placements,
+        string legend
+    )
+    {
+        const float previewSize = 260f;
+        var rect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.ExpandWidth(true));
+        EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
+
+        var minX = float.PositiveInfinity;
+        var maxX = float.NegativeInfinity;
+        var minZ = float.PositiveInfinity;
+        var maxZ = float.NegativeInfinity;
+
+        if (slices != null)
+        {
+            foreach (var slice in slices)
+            {
+                if (!TryGetSliceBounds(slice, out var sliceMinX, out var sliceMaxX, out var sliceMinZ, out var sliceMaxZ))
+                {
+                    continue;
+                }
+                minX = Mathf.Min(minX, sliceMinX);
+                maxX = Mathf.Max(maxX, sliceMaxX);
+                minZ = Mathf.Min(minZ, sliceMinZ);
+                maxZ = Mathf.Max(maxZ, sliceMaxZ);
+            }
+        }
+
+        if (placements != null)
+        {
+            foreach (var placement in placements)
+            {
+                if (placement?.position == null)
+                {
+                    continue;
+                }
+                minX = Mathf.Min(minX, placement.position.x);
+                maxX = Mathf.Max(maxX, placement.position.x);
+                minZ = Mathf.Min(minZ, placement.position.z);
+                maxZ = Mathf.Max(maxZ, placement.position.z);
+            }
+        }
+
+        if (float.IsInfinity(minX))
+        {
+            GUI.Label(rect, "Keine Platzierungsdaten verfügbar.", EditorStyles.centeredGreyMiniLabel);
+            return;
+        }
+
+        var spanX = Mathf.Max(1f, maxX - minX);
+        var spanZ = Mathf.Max(1f, maxZ - minZ);
+        var padding = 0.5f;
+        minX -= padding;
+        maxX += padding;
+        minZ -= padding;
+        maxZ += padding;
+        spanX = maxX - minX;
+        spanZ = maxZ - minZ;
+
+        var scale = Mathf.Min(rect.width / spanX, rect.height / spanZ);
+
+        Vector2 WorldToPreview(Vector3Data position)
+        {
+            var x = rect.x + (position.x - minX) * scale;
+            var z = rect.y + rect.height - (position.z - minZ) * scale;
+            return new Vector2(x, z);
+        }
+
+        Handles.BeginGUI();
+        if (slices != null)
+        {
+            var fillColor = new Color(0.3f, 0.5f, 0.8f, 0.55f);
+            var outlineColor = new Color(0.2f, 0.35f, 0.55f, 0.9f);
+            foreach (var slice in slices)
+            {
+                if (!TryGetSliceBounds(slice, out var sliceMinX, out var sliceMaxX, out var sliceMinZ, out var sliceMaxZ))
+                {
+                    continue;
+                }
+
+                var minPreview = WorldToPreview(new Vector3Data { x = sliceMinX, y = 0f, z = sliceMinZ });
+                var maxPreview = WorldToPreview(new Vector3Data { x = sliceMaxX, y = 0f, z = sliceMaxZ });
+                var xMin = Mathf.Min(minPreview.x, maxPreview.x);
+                var xMax = Mathf.Max(minPreview.x, maxPreview.x);
+                var yMin = Mathf.Min(minPreview.y, maxPreview.y);
+                var yMax = Mathf.Max(minPreview.y, maxPreview.y);
+
+                var rectPoints = new[]
+                {
+                    new Vector3(xMin, yMin, 0f),
+                    new Vector3(xMax, yMin, 0f),
+                    new Vector3(xMax, yMax, 0f),
+                    new Vector3(xMin, yMax, 0f),
+                };
+                Handles.DrawSolidRectangleWithOutline(rectPoints, fillColor, outlineColor);
+            }
+        }
+
+        if (placements != null)
+        {
+            Handles.color = new Color(0.95f, 0.55f, 0.2f, 0.9f);
+            foreach (var placement in placements)
+            {
+                if (placement?.position == null)
+                {
+                    continue;
+                }
+                var center = WorldToPreview(placement.position);
+                Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, 5f);
+            }
+        }
+        Handles.EndGUI();
+
+        var legendRect = GUILayoutUtility.GetRect(rect.width, 18f);
+        EditorGUI.LabelField(legendRect, legend, EditorStyles.miniLabel);
+    }
+
+    private bool TryGetSliceBounds(
+        SliceObject slice,
+        out float minX,
+        out float maxX,
+        out float minZ,
+        out float maxZ
+    )
+    {
+        minX = 0f;
+        maxX = 0f;
+        minZ = 0f;
+        maxZ = 0f;
+        if (slice?.position == null)
+        {
+            return false;
+        }
+
+        var width = 0f;
+        var depth = 0f;
+        if (slice.dimensions != null)
+        {
+            width = slice.dimensions.width;
+            depth = slice.dimensions.depth;
+        }
+        if ((width <= 0f || depth <= 0f) && slice.size != null)
+        {
+            if (width <= 0f)
+            {
+                width = slice.size.x;
+            }
+            if (depth <= 0f)
+            {
+                depth = slice.size.z;
+            }
+        }
+
+        width = Mathf.Abs(width);
+        depth = Mathf.Abs(depth);
+        if (width <= 0f)
+        {
+            width = 0.6f;
+        }
+        if (depth <= 0f)
+        {
+            depth = 0.6f;
+        }
+
+        var halfWidth = width * 0.5f;
+        var halfDepth = depth * 0.5f;
+        minX = slice.position.x - halfWidth;
+        maxX = slice.position.x + halfWidth;
+        minZ = slice.position.z - halfDepth;
+        maxZ = slice.position.z + halfDepth;
+        return true;
+    }
+
+    private void LoadSliceObjects()
+    {
+        sliceObjects = new List<SliceObject>();
+        if (string.IsNullOrEmpty(arrowJson))
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var payload = JsonUtility.FromJson<ArrowPayload>(arrowJson);
+        if (payload != null)
+        {
+            AppendSlices(payload.slices, seen);
+            AppendSlices(payload.slice_objects, seen);
+            AppendSlices(payload.sliceObjects, seen);
+            if (payload.slice != null)
+            {
+                AppendSlices(payload.slice.slices, seen);
+                AppendSlices(payload.slice.objects, seen);
+                AppendSlices(payload.slice.items, seen);
+            }
+            if (!string.IsNullOrEmpty(payload.slice_json))
+            {
+                AppendSlices(ParseSliceCollection(payload.slice_json), seen);
+            }
+            if (!string.IsNullOrEmpty(payload.sliceJson))
+            {
+                AppendSlices(ParseSliceCollection(payload.sliceJson), seen);
+            }
+        }
+
+        AppendSlices(ParseSliceCollection(arrowJson), seen);
+    }
+
+    private SliceObject[] ParseSliceCollection(string json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return Array.Empty<SliceObject>();
+        }
+
+        var trimmed = json.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return Array.Empty<SliceObject>();
+        }
+
+        if (trimmed.StartsWith("["))
+        {
+            trimmed = "{\"slices\":" + trimmed + "}";
+        }
+
+        var collection = JsonUtility.FromJson<SliceCollection>(trimmed);
+        if (collection == null)
+        {
+            return Array.Empty<SliceObject>();
+        }
+
+        if (collection.slices != null && collection.slices.Length > 0)
+        {
+            return collection.slices;
+        }
+        if (collection.objects != null && collection.objects.Length > 0)
+        {
+            return collection.objects;
+        }
+        if (collection.items != null && collection.items.Length > 0)
+        {
+            return collection.items;
+        }
+
+        return Array.Empty<SliceObject>();
+    }
+
+    private void AppendSlices(SliceObject[] slices, HashSet<string> seen)
+    {
+        if (slices == null)
+        {
+            return;
+        }
+
+        foreach (var slice in slices)
+        {
+            if (slice == null)
+            {
+                continue;
+            }
+            if (!string.IsNullOrEmpty(slice.objectId))
+            {
+                if (seen.Contains(slice.objectId))
+                {
+                    continue;
+                }
+                seen.Add(slice.objectId);
+            }
+            sliceObjects.Add(slice);
+        }
     }
 }
 #endif
