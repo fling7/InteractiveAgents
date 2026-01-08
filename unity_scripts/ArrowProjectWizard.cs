@@ -51,6 +51,15 @@ public class ArrowProjectWizard : EditorWindow
     }
 
     [Serializable]
+    public class Bounds2D
+    {
+        public float min_x;
+        public float max_x;
+        public float min_z;
+        public float max_z;
+    }
+
+    [Serializable]
     public class PlacementSummary
     {
         public string id;
@@ -76,6 +85,7 @@ public class ArrowProjectWizard : EditorWindow
         public string name;
         public Vector3Data position;
         public float radius;
+        public Bounds2D bounds;
     }
 
     [Serializable]
@@ -736,6 +746,7 @@ public class ArrowProjectWizard : EditorWindow
         EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
 
         var positions = new List<Vector3Data>();
+        var boundsList = new List<Bounds2D>();
         if (roomObjects != null)
         {
             foreach (var obj in roomObjects)
@@ -743,6 +754,10 @@ public class ArrowProjectWizard : EditorWindow
                 if (obj?.position != null)
                 {
                     positions.Add(obj.position);
+                }
+                if (obj?.bounds != null)
+                {
+                    boundsList.Add(obj.bounds);
                 }
             }
         }
@@ -757,7 +772,7 @@ public class ArrowProjectWizard : EditorWindow
             }
         }
 
-        if (positions.Count == 0)
+        if (positions.Count == 0 && boundsList.Count == 0)
         {
             GUI.Label(rect, "Keine Platzierungsdaten verfügbar.", EditorStyles.centeredGreyMiniLabel);
             return;
@@ -773,6 +788,13 @@ public class ArrowProjectWizard : EditorWindow
             maxX = Mathf.Max(maxX, pos.x);
             minZ = Mathf.Min(minZ, pos.z);
             maxZ = Mathf.Max(maxZ, pos.z);
+        }
+        foreach (var bounds in boundsList)
+        {
+            minX = Mathf.Min(minX, bounds.min_x);
+            maxX = Mathf.Max(maxX, bounds.max_x);
+            minZ = Mathf.Min(minZ, bounds.min_z);
+            maxZ = Mathf.Max(maxZ, bounds.max_z);
         }
 
         var spanX = Mathf.Max(1f, maxX - minX);
@@ -800,13 +822,29 @@ public class ArrowProjectWizard : EditorWindow
             Handles.color = new Color(0.45f, 0.55f, 0.6f, 0.7f);
             foreach (var obj in roomObjects)
             {
-                if (obj?.position == null)
+                if (obj == null)
                 {
                     continue;
                 }
-                var center = WorldToPreview(obj.position);
-                var radius = Mathf.Max(4f, obj.radius * scale);
-                Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, radius);
+                if (obj.bounds != null)
+                {
+                    var minCorner = WorldToPreview(new Vector3Data { x = obj.bounds.min_x, z = obj.bounds.min_z });
+                    var maxCorner = WorldToPreview(new Vector3Data { x = obj.bounds.max_x, z = obj.bounds.max_z });
+                    var rectPoints = new[]
+                    {
+                        new Vector3(minCorner.x, minCorner.y, 0f),
+                        new Vector3(minCorner.x, maxCorner.y, 0f),
+                        new Vector3(maxCorner.x, maxCorner.y, 0f),
+                        new Vector3(maxCorner.x, minCorner.y, 0f),
+                    };
+                    Handles.DrawSolidRectangleWithOutline(rectPoints, Handles.color, new Color(0f, 0f, 0f, 0.2f));
+                }
+                else if (obj.position != null)
+                {
+                    var center = WorldToPreview(obj.position);
+                    var radius = Mathf.Max(4f, obj.radius * scale);
+                    Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, radius);
+                }
             }
         }
 
