@@ -150,9 +150,6 @@ public class ArrowProjectWizard : EditorWindow
         public string name;
         public Vector3Data position;
         public float radius;
-        public DimensionsData dimensions;
-        public float width;
-        public float depth;
     }
 
     [Serializable]
@@ -481,7 +478,7 @@ public class ArrowProjectWizard : EditorWindow
             DrawPlacementPreview(
                 draft.placement_preview.room_objects,
                 draft.placement_preview.agent_placements,
-                "Legende: Objekte = Schnitt-Kuben, Agenten = Marker"
+                "Legende: Blau = Objekt, Orange = Agent"
             );
         }
     }
@@ -830,23 +827,14 @@ public class ArrowProjectWizard : EditorWindow
         EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
 
         var positions = new List<Vector3Data>();
-        var objectBounds = new List<Bounds>();
         if (roomObjects != null)
         {
             foreach (var obj in roomObjects)
             {
-                if (obj?.position == null)
+                if (obj?.position != null)
                 {
-                    continue;
+                    positions.Add(obj.position);
                 }
-
-                if (TryGetRoomObjectSize(obj, out var size))
-                {
-                    var bounds = new Bounds(new Vector3(obj.position.x, 0f, obj.position.z), new Vector3(size.x, 0f, size.z));
-                    objectBounds.Add(bounds);
-                }
-
-                positions.Add(obj.position);
             }
         }
         if (placements != null)
@@ -870,25 +858,12 @@ public class ArrowProjectWizard : EditorWindow
         var maxX = float.NegativeInfinity;
         var minZ = float.PositiveInfinity;
         var maxZ = float.NegativeInfinity;
-        if (objectBounds.Count > 0)
+        foreach (var pos in positions)
         {
-            foreach (var bounds in objectBounds)
-            {
-                minX = Mathf.Min(minX, bounds.min.x);
-                maxX = Mathf.Max(maxX, bounds.max.x);
-                minZ = Mathf.Min(minZ, bounds.min.z);
-                maxZ = Mathf.Max(maxZ, bounds.max.z);
-            }
-        }
-        else
-        {
-            foreach (var pos in positions)
-            {
-                minX = Mathf.Min(minX, pos.x);
-                maxX = Mathf.Max(maxX, pos.x);
-                minZ = Mathf.Min(minZ, pos.z);
-                maxZ = Mathf.Max(maxZ, pos.z);
-            }
+            minX = Mathf.Min(minX, pos.x);
+            maxX = Mathf.Max(maxX, pos.x);
+            minZ = Mathf.Min(minZ, pos.z);
+            maxZ = Mathf.Max(maxZ, pos.z);
         }
 
         var spanX = Mathf.Max(1f, maxX - minX);
@@ -913,31 +888,16 @@ public class ArrowProjectWizard : EditorWindow
         Handles.BeginGUI();
         if (roomObjects != null)
         {
-            var fillColor = new Color(0.45f, 0.55f, 0.6f, 0.35f);
-            var outlineColor = new Color(0.45f, 0.55f, 0.6f, 0.9f);
+            Handles.color = new Color(0.45f, 0.55f, 0.6f, 0.7f);
             foreach (var obj in roomObjects)
             {
                 if (obj?.position == null)
                 {
                     continue;
                 }
-                if (!TryGetRoomObjectSize(obj, out var size))
-                {
-                    continue;
-                }
-
                 var center = WorldToPreview(obj.position);
-                var halfWidth = Mathf.Max(2f, size.x * 0.5f * scale);
-                var halfDepth = Mathf.Max(2f, size.z * 0.5f * scale);
-
-                var rectPoints = new Vector3[]
-                {
-                    new Vector3(center.x - halfWidth, center.y - halfDepth, 0f),
-                    new Vector3(center.x - halfWidth, center.y + halfDepth, 0f),
-                    new Vector3(center.x + halfWidth, center.y + halfDepth, 0f),
-                    new Vector3(center.x + halfWidth, center.y - halfDepth, 0f)
-                };
-                Handles.DrawSolidRectangleWithOutline(rectPoints, fillColor, outlineColor);
+                var radius = Mathf.Max(4f, obj.radius * scale);
+                Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, radius);
             }
         }
 
@@ -958,35 +918,6 @@ public class ArrowProjectWizard : EditorWindow
 
         var legendRect = GUILayoutUtility.GetRect(rect.width, 18f);
         EditorGUI.LabelField(legendRect, legend, EditorStyles.miniLabel);
-    }
-
-    private bool TryGetRoomObjectSize(RoomObjectSummary obj, out Vector3 size)
-    {
-        size = Vector3.zero;
-        if (obj == null)
-        {
-            return false;
-        }
-
-        if (obj.dimensions != null && obj.dimensions.TryGetVector3(out size))
-        {
-            return true;
-        }
-
-        if (obj.width > 0f || obj.depth > 0f)
-        {
-            size = new Vector3(Mathf.Max(obj.width, 0.01f), 0f, Mathf.Max(obj.depth, 0.01f));
-            return true;
-        }
-
-        if (obj.radius > 0f)
-        {
-            var diameter = Mathf.Max(obj.radius * 2f, 0.01f);
-            size = new Vector3(diameter, 0f, diameter);
-            return true;
-        }
-
-        return false;
     }
 
     private void GenerateSliceFromArrowJson()
