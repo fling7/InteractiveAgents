@@ -1,0 +1,1 @@
+MuseoNova XR ist ein begehbares, dialogbasiertes Multi-Agenten-System für virtuelle Ausstellungen. Besucher:innen interagieren mit spezialisierten Agenten, die jeweils für bestimmte Themenbereiche zuständig sind. Das System ersetzt den klassischen Chatbot durch ein Ensemble charakterstarker Agents, die Wissen gezielt und arbeitsteilig vermitteln.

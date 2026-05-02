@@ -1,0 +1,1 @@
+Die APIs von MuseoNova XR sind REST-basiert, dokumentiert und auf Sicherheit ausgelegt. Rho erläutert Authentifizierung, Rechteverwaltung und Best Practices für eine stabile und skalierbare Integration.

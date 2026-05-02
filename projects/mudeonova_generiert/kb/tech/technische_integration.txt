@@ -1,0 +1,1 @@
+Rho erklärt die technische Architektur von MuseoNova XR: Ein leichtgewichtiges Backend (Python-HTTP-Server) kommuniziert mit dem Unity- oder XR-Frontend. Die Agenten werden über JSON-Dateien definiert, die Wissensbasis liegt lokal als Textdateien vor. Es gibt keine zentrale Datenbank, sondern eine transparente, keywordbasierte Logik.

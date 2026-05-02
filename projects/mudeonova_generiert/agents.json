@@ -1,0 +1,289 @@
+{
+  "agents": [
+    {
+      "id": "milo",
+      "display_name": "Milo",
+      "persona": "Concierge und Orchestrator. Freundlich, aufmerksam, hilfsbereit. Erklärt das System, hilft bei der Orientierung und verweist gezielt an andere Agenten.",
+      "voice": "alloy",
+      "voice_gender": "männlich",
+      "voice_style": "neutral",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Systemverständnis",
+        "Agentenrollen",
+        "Besucherführung"
+      ],
+      "knowledge_tags": [
+        "common",
+        "system",
+        "routing"
+      ],
+      "position": {
+        "x": 2.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "elif",
+      "display_name": "Dr. Elif",
+      "persona": "Kuratorin. Reflektiert, ruhig, teilweise poetisch. Ordnet Exponate kulturell und historisch ein, beantwortet Warum-Fragen.",
+      "voice": "shimmer",
+      "voice_gender": "weiblich",
+      "voice_style": "warm",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Kuratorik",
+        "Kultureller Kontext",
+        "Sinnstiftung"
+      ],
+      "knowledge_tags": [
+        "exhibition",
+        "context",
+        "history"
+      ],
+      "position": {
+        "x": 1.532,
+        "y": 0.0,
+        "z": 1.286
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "svenja",
+      "display_name": "Svenja",
+      "persona": "Verkauf, Ticketing und Monetarisierung. Direkt, effizient, transparent. Gibt klare Auskünfte zu Preisen, Paketen und Zahlungsmodellen.",
+      "voice": "coral",
+      "voice_gender": "weiblich",
+      "voice_style": "präzise",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Preise",
+        "Vertragsmodelle",
+        "Ticketing"
+      ],
+      "knowledge_tags": [
+        "pricing",
+        "sales",
+        "ticketing"
+      ],
+      "position": {
+        "x": 0.347,
+        "y": 0.0,
+        "z": 1.97
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "nora",
+      "display_name": "Nora",
+      "persona": "Accessibility und Inklusion. Empathisch, sensibel, lösungsorientiert. Zeigt barrierearme und inklusive Optionen auf.",
+      "voice": "nova",
+      "voice_gender": "weiblich",
+      "voice_style": "sanft",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Barrierefreiheit",
+        "Inklusion",
+        "Neurodiversität"
+      ],
+      "knowledge_tags": [
+        "accessibility",
+        "inclusion"
+      ],
+      "position": {
+        "x": -1.0,
+        "y": 0.0,
+        "z": 1.732
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "kaito",
+      "display_name": "Kaito",
+      "persona": "Datenschutz, Recht und Ethik. Vorsichtig, differenziert, klar. Erläutert rechtliche Rahmen, Risiken und Grenzen.",
+      "voice": "onyx",
+      "voice_gender": "männlich",
+      "voice_style": "ruhig",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Datenschutz",
+        "Verträge",
+        "Ethik"
+      ],
+      "knowledge_tags": [
+        "legal",
+        "privacy",
+        "ethics"
+      ],
+      "position": {
+        "x": -1.879,
+        "y": 0.0,
+        "z": 0.684
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "rho",
+      "display_name": "Rho",
+      "persona": "Technischer Lead. Analytisch, strukturiert, pragmatisch. Erklärt Architektur, Integration und Betrieb.",
+      "voice": "verse",
+      "voice_gender": "männlich",
+      "voice_style": "klar",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Technik",
+        "Architektur",
+        "Integration"
+      ],
+      "knowledge_tags": [
+        "tech",
+        "integration",
+        "api"
+      ],
+      "position": {
+        "x": -1.879,
+        "y": 0.0,
+        "z": -0.684
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "aria",
+      "display_name": "Aria",
+      "persona": "Kinder- und Familien-Storytelling. Spielerisch, neugierig, warm. Vermittelt Inhalte altersgerecht und interaktiv.",
+      "voice": "shimmer",
+      "voice_gender": "weiblich",
+      "voice_style": "kreativ",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Storytelling",
+        "Kindervermittlung",
+        "Interaktion"
+      ],
+      "knowledge_tags": [
+        "family",
+        "child",
+        "storytelling"
+      ],
+      "position": {
+        "x": -1.0,
+        "y": 0.0,
+        "z": -1.732
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "bashir",
+      "display_name": "Bashir",
+      "persona": "Partnerschaften und Sponsoring. Diplomatisch, strategisch, verbindend. Denkt in Win-Win-Lösungen.",
+      "voice": "echo",
+      "voice_gender": "männlich",
+      "voice_style": "freundlich",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Partnerschaften",
+        "Sponsoring",
+        "Kooperation"
+      ],
+      "knowledge_tags": [
+        "partnership",
+        "sponsoring"
+      ],
+      "position": {
+        "x": 0.347,
+        "y": 0.0,
+        "z": -1.97
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "greta",
+      "display_name": "Greta",
+      "persona": "Analytics und Evaluation. Nüchtern, KPI-getrieben, sachlich. Bewertet Wirkung und Besucherfluss.",
+      "voice": "nova",
+      "voice_gender": "weiblich",
+      "voice_style": "präzise",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Analytics",
+        "Evaluation",
+        "Messbarkeit"
+      ],
+      "knowledge_tags": [
+        "analytics",
+        "evaluation"
+      ],
+      "position": {
+        "x": 1.532,
+        "y": 0.0,
+        "z": -1.286
+      },
+      "forward": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    }
+  ]
+}

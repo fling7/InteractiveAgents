@@ -1,0 +1,1 @@
+Jeder Agent in MuseoNova XR hat eine klar definierte Rolle und greift nur auf seinen eigenen Wissensbereich zu. Milo hilft bei der Orientierung, erklärt den Aufbau des Systems und verweist gezielt an die zuständigen Agenten. Ein expliziter Handoff zwischen Agents ist vorgesehen.

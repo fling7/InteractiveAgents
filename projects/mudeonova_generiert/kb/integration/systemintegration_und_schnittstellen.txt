@@ -1,0 +1,1 @@
+Rho beschreibt, wie MuseoNova XR in bestehende Systeme integriert werden kann. Dazu zählen API-Schnittstellen, Authentifizierung, Datenimport/-export und die Anbindung an externe Services wie Analytics oder Ticketing.
