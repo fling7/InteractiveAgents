@@ -4,9 +4,84 @@ import math
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+# MLDS object types and groups that should not be treated as floor obstacles
+_MLDS_SKIP_TYPES = {"floor", "ceiling", "wall"}
+_MLDS_SKIP_GROUPS = {"structural", "floor"}
+
 
 def _vec3(d: Dict[str, Any]) -> Tuple[float, float, float]:
     return (float(d.get("x", 0.0)), float(d.get("y", 0.0)), float(d.get("z", 0.0)))
+
+
+def _is_mlds(d: Dict[str, Any]) -> bool:
+    """True if the dict is an MLDS scene JSON (has scene.objects list)."""
+    scene = d.get("scene")
+    return isinstance(scene, dict) and isinstance(scene.get("objects"), list)
+
+
+def mlds_room_bounds(mlds_json: Dict[str, Any]) -> Optional[Dict[str, float]]:
+    """Return {min_x, max_x, min_z, max_z} from scene.environment.dimensions, or None."""
+    scene = mlds_json.get("scene") or {}
+    dims = (scene.get("environment") or {}).get("dimensions") or {}
+    w = float(dims.get("width") or 0)
+    d = float(dims.get("depth") or 0)
+    if w > 0 and d > 0:
+        return {"min_x": -w / 2, "max_x": w / 2, "min_z": -d / 2, "max_z": d / 2}
+    return None
+
+
+def mlds_slice_obstacles(
+    mlds_json: Dict[str, Any],
+    *,
+    slice_y: float = 0.5,
+) -> List[Dict[str, Any]]:
+    """
+    Extract floor-obstacle footprints from an MLDS scene by slicing at slice_y.
+
+    Only objects whose vertical extent [center_y - height/2, center_y + height/2]
+    intersects slice_y are included. Structural elements (floor, ceiling, walls)
+    are always skipped. Returns dicts with: id, name, position, width, depth, radius.
+    """
+    scene = mlds_json.get("scene") or mlds_json
+    result: List[Dict[str, Any]] = []
+    for obj in (scene.get("objects") or []):
+        if not isinstance(obj, dict):
+            continue
+        obj_type = str(obj.get("objectType") or "").lower()
+        group = str(obj.get("group") or "").lower()
+        if obj_type in _MLDS_SKIP_TYPES or group in _MLDS_SKIP_GROUPS:
+            continue
+        pos = obj.get("position") or {}
+        dims = obj.get("dimensions") or {}
+        cy = float(pos.get("y") or 0)
+        height = float(dims.get("height") or 0)
+        if not (cy - height / 2 <= slice_y <= cy + height / 2):
+            continue
+        cx = float(pos.get("x") or 0)
+        cz = float(pos.get("z") or 0)
+        width = float(dims.get("width") or 0.5)
+        depth = float(dims.get("depth") or 0.5)
+        obj_id = str(obj.get("objectId") or obj.get("id") or f"obj_{len(result) + 1}")
+        result.append({
+            "id": obj_id,
+            "name": str(obj.get("objectType") or obj_id),
+            "position": {"x": cx, "y": 0.0, "z": cz},
+            "width": width,
+            "depth": depth,
+            "radius": max(0.2, 0.5 * max(width, depth)),
+        })
+    return result
+
+
+def _mlds_forward_toward_center(
+    agent_pos: Tuple[float, float, float],
+    center_z: float,
+) -> Dict[str, float]:
+    """Return a forward vector pointing from agent toward the room center (XZ plane)."""
+    dz = center_z - agent_pos[2]
+    if abs(dz) < 0.1:
+        return {"x": 0.0, "y": 0.0, "z": 1.0}
+    return {"x": 0.0, "y": 0.0, "z": round(math.copysign(1.0, dz), 3)}
 
 
 def _distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
@@ -224,11 +299,25 @@ def normalize_placement_preview(
     agents: List[Dict[str, Any]],
     preview: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    room_objects = _room_objects_from_preview(preview.get("room_objects") if isinstance(preview, dict) else None)
-    if not room_objects:
-        room_objects = summarize_room_objects(room_plan, floor_only=True)
+    is_mlds = _is_mlds(room_plan)
 
-    candidates = _agent_candidates_from_preview(preview.get("agent_placements") if isinstance(preview, dict) else None)
+    if is_mlds:
+        # Use geometry-accurate 2D slice obstacles from the MLDS scene
+        room_objects = mlds_slice_obstacles(room_plan)
+        bounds = mlds_room_bounds(room_plan)
+        center_z = ((bounds["min_z"] + bounds["max_z"]) / 2.0) if bounds else 0.0
+    else:
+        room_objects = _room_objects_from_preview(
+            preview.get("room_objects") if isinstance(preview, dict) else None
+        )
+        if not room_objects:
+            room_objects = summarize_room_objects(room_plan, floor_only=True)
+        bounds = None
+        center_z = 0.0
+
+    candidates = _agent_candidates_from_preview(
+        preview.get("agent_placements") if isinstance(preview, dict) else None
+    )
     placed_positions: List[Tuple[float, float, float]] = []
     agent_placements = []
 
@@ -243,11 +332,13 @@ def normalize_placement_preview(
             start = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
             resolved = _find_open_position(start, room_objects, placed_positions)
             placed_positions.append(resolved)
+            forward = _mlds_forward_toward_center(resolved, center_z) if is_mlds else {"x": 0.0, "y": 0.0, "z": 1.0}
             agent_placements.append(
                 {
                     "id": agent_id,
                     "display_name": agent.get("display_name") or candidate.get("display_name") or agent_id,
                     "position": {"x": round(resolved[0], 3), "y": 0.0, "z": round(resolved[2], 3)},
+                    "forward": forward,
                 }
             )
         else:
@@ -264,15 +355,20 @@ def normalize_placement_preview(
             start = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
             resolved = _find_open_position(start, room_objects, placed_positions)
             placed_positions.append(resolved)
+            forward = _mlds_forward_toward_center(resolved, center_z) if is_mlds else placement.get("forward", {"x": 0.0, "y": 0.0, "z": 1.0})
             agent_placements.append(
                 {
                     "id": agent_id,
                     "display_name": agent.get("display_name") or agent_id,
                     "position": {"x": round(resolved[0], 3), "y": 0.0, "z": round(resolved[2], 3)},
+                    "forward": forward,
                 }
             )
 
-    return {"room_objects": room_objects, "agent_placements": agent_placements}
+    result: Dict[str, Any] = {"room_objects": room_objects, "agent_placements": agent_placements}
+    if is_mlds and bounds:
+        result["room_bounds"] = bounds
+    return result
 
 
 def _infer_preferences(room_plan: Dict[str, Any], agent: Dict[str, Any]) -> Tuple[List[str], List[str]]:

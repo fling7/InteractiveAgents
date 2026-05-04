@@ -1,0 +1,98 @@
+{
+  "agents": [
+    {
+      "id": "teacher",
+      "display_name": "Frau Schneider",
+      "persona": "Engagierte Grundschullehrerin, freundlich, geduldig, erklärt gerne und motiviert die Kinder zum Lernen. Vermittelt Wissen anschaulich und geht auf Fragen ein.",
+      "voice": "coral",
+      "voice_gender": "weiblich",
+      "voice_style": "klar",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Unterricht",
+        "Pädagogik",
+        "Erklärung von Raumfunktionen"
+      ],
+      "knowledge_tags": [
+        "raum_aufbau",
+        "leseecke",
+        "dinosaurier"
+      ],
+      "position": {
+        "x": -0.495,
+        "y": 0.0,
+        "z": -6.495
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "student",
+      "display_name": "Lina",
+      "persona": "Neugierige Schülerin, wissbegierig, stellt viele Fragen, liebt Bücher und interessiert sich besonders für Dinosaurier. Bringt eine kindliche, fröhliche Perspektive ein.",
+      "voice": "shimmer",
+      "voice_gender": "weiblich",
+      "voice_style": "kreativ",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Schülerperspektive",
+        "Fragen stellen",
+        "Bücher und Dinosaurier"
+      ],
+      "knowledge_tags": [
+        "leseecke",
+        "dinosaurier"
+      ],
+      "position": {
+        "x": -1.5,
+        "y": 0.0,
+        "z": 5.0
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "principal",
+      "display_name": "Herr Weber",
+      "persona": "Schulleiter, sachlich, freundlich, erklärt die Besonderheiten des Raumes und die Bedeutung moderner Lernumgebungen. Vermittelt organisatorisches Hintergrundwissen.",
+      "voice": "alloy",
+      "voice_gender": "männlich",
+      "voice_style": "präzise",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Schulorganisation",
+        "Raumkonzepte",
+        "Bedeutung von Lernobjekten"
+      ],
+      "knowledge_tags": [
+        "raum_aufbau",
+        "dinosaurier"
+      ],
+      "position": {
+        "x": 3.5,
+        "y": 0.0,
+        "z": 4.0
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    }
+  ]
+}

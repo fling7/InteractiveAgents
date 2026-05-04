@@ -67,6 +67,7 @@ public class ArrowProjectWizard : EditorWindow
     {
         public RoomObjectSummary[] room_objects;
         public PlacementSummary[] agent_placements;
+        public RoomBounds room_bounds;  // populated for MLDS scenes
     }
 
     [Serializable]
@@ -76,6 +77,17 @@ public class ArrowProjectWizard : EditorWindow
         public string name;
         public Vector3Data position;
         public float radius;
+        public float width;   // MLDS: actual footprint width (X)
+        public float depth;   // MLDS: actual footprint depth (Z)
+    }
+
+    [Serializable]
+    public class RoomBounds
+    {
+        public float min_x;
+        public float max_x;
+        public float min_z;
+        public float max_z;
     }
 
     [Serializable]
@@ -139,6 +151,7 @@ public class ArrowProjectWizard : EditorWindow
         public ProjectMetadata project;
         public PlacementSummary[] placements;
         public RoomObjectSummary[] room_objects;
+        public RoomBounds room_bounds;
     }
 
     private class EditorCoroutine
@@ -215,6 +228,7 @@ public class ArrowProjectWizard : EditorWindow
     private bool isChatting;
     private bool isCommitting;
     private string committedProjectId = "";
+    private Texture2D _previewTex;
 
     [MenuItem("Tools/MLDSI Project Wizard")]
     public static void ShowWindow()
@@ -232,6 +246,7 @@ public class ArrowProjectWizard : EditorWindow
     {
         EditorApplication.update -= TickCoroutines;
         ActiveCoroutines.Clear();
+        if (_previewTex != null) { DestroyImmediate(_previewTex); _previewTex = null; }
     }
 
     private static void TickCoroutines()
@@ -399,11 +414,11 @@ public class ArrowProjectWizard : EditorWindow
             && draft.placement_preview.agent_placements != null)
         {
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Platzierungsvorschau (OpenAI)", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Platzierungsvorschau", EditorStyles.boldLabel);
             DrawPlacementPreview(
                 draft.placement_preview.room_objects,
                 draft.placement_preview.agent_placements,
-                "Legende: Blau = Objekt, Orange = Agent"
+                draft.placement_preview.room_bounds
             );
         }
     }
@@ -572,6 +587,7 @@ public class ArrowProjectWizard : EditorWindow
         sessionId = response.session_id;
         draft = response.draft;
         SyncDraftFields();
+        RebuildPreviewTexture(draft?.placement_preview);
         statusMessage = "Analyse abgeschlossen.";
         if (!string.IsNullOrEmpty(draft?.assistant_message))
         {
@@ -590,6 +606,7 @@ public class ArrowProjectWizard : EditorWindow
 
         draft = response.draft;
         SyncDraftFields();
+        RebuildPreviewTexture(draft?.placement_preview);
         statusMessage = "Chat aktualisiert.";
         if (!string.IsNullOrEmpty(draft?.assistant_message))
         {
@@ -616,7 +633,9 @@ public class ArrowProjectWizard : EditorWindow
             {
                 room_objects = response.room_objects,
                 agent_placements = response.placements,
+                room_bounds = response.room_bounds,
             };
+            RebuildPreviewTexture(draft.placement_preview);
         }
         EditorUtility.DisplayDialog("Projekt gespeichert", "Alles wurde gespeichert.", "OK");
     }
@@ -725,108 +744,225 @@ public class ArrowProjectWizard : EditorWindow
         Repaint();
     }
 
+    // ── Texture-based floor plan preview ────────────────────────────────────
+
+    private void RebuildPreviewTexture(PlacementPreview preview)
+    {
+        if (preview == null) return;
+
+        const int W = 512, H = 512;
+        if (_previewTex == null || _previewTex.width != W || _previewTex.height != H)
+        {
+            if (_previewTex != null) DestroyImmediate(_previewTex);
+            _previewTex = new Texture2D(W, H, TextureFormat.RGBA32, false)
+            {
+                filterMode = FilterMode.Bilinear,
+                wrapMode   = TextureWrapMode.Clamp,
+            };
+        }
+
+        var roomObjects = preview.room_objects;
+        var placements  = preview.agent_placements;
+        var roomBounds  = preview.room_bounds;
+
+        // ── world bounds ──────────────────────────────────────────────────
+        float minX, maxX, minZ, maxZ;
+        if (roomBounds != null)
+        {
+            minX = roomBounds.min_x; maxX = roomBounds.max_x;
+            minZ = roomBounds.min_z; maxZ = roomBounds.max_z;
+        }
+        else
+        {
+            minX = maxX = minZ = maxZ = 0f;
+            bool any = false;
+            if (roomObjects != null)
+                foreach (var o in roomObjects)
+                    if (o?.position != null) { GrowBounds(o.position.x, o.position.z, ref minX, ref maxX, ref minZ, ref maxZ, ref any); }
+            if (placements != null)
+                foreach (var p in placements)
+                    if (p?.position != null) { GrowBounds(p.position.x, p.position.z, ref minX, ref maxX, ref minZ, ref maxZ, ref any); }
+            if (!any) { TexClearAndApply(_previewTex, W, H, new Color32(30, 33, 35, 255)); return; }
+        }
+
+        const float pad = 0.8f;
+        minX -= pad; maxX += pad; minZ -= pad; maxZ += pad;
+        float spanX = Mathf.Max(0.1f, maxX - minX);
+        float spanZ = Mathf.Max(0.1f, maxZ - minZ);
+
+        // Keep aspect ratio: find the largest drawing area inside W×H
+        float scale = Mathf.Min(W / spanX, H / spanZ);
+        int dw = Mathf.RoundToInt(spanX * scale);
+        int dh = Mathf.RoundToInt(spanZ * scale);
+        int ox = (W - dw) / 2;   // left margin in pixels
+        int oy = (H - dh) / 2;   // bottom margin in pixels (Tex y=0 is bottom)
+
+        // world → texture pixel  (y=0 at bottom of texture = low-Z in world)
+        (int tx, int ty) W2T(float wx, float wz) => (
+            ox + Mathf.RoundToInt((wx - minX) * scale),
+            oy + Mathf.RoundToInt((wz - minZ) * scale)
+        );
+
+        var pixels = new Color32[W * H];
+
+        // Background
+        var bg = new Color32(30, 33, 35, 255);
+        for (int i = 0; i < pixels.Length; i++) pixels[i] = bg;
+
+        // Room floor fill
+        if (roomBounds != null)
+        {
+            var (x0, y0) = W2T(roomBounds.min_x, roomBounds.min_z);
+            var (x1, y1) = W2T(roomBounds.max_x, roomBounds.max_z);
+            TexFillRect(pixels, W, H, x0, y0, x1 - x0, y1 - y0, new Color32(46, 51, 56, 255));
+            // Wall border (3 px)
+            var wall = new Color32(165, 165, 165, 220);
+            TexFillRect(pixels, W, H, x0,      y0,      x1 - x0, 3, wall); // south wall
+            TexFillRect(pixels, W, H, x0,      y1 - 3,  x1 - x0, 3, wall); // north wall
+            TexFillRect(pixels, W, H, x0,      y0,      3, y1 - y0, wall); // west wall
+            TexFillRect(pixels, W, H, x1 - 3,  y0,      3, y1 - y0, wall); // east wall
+        }
+
+        // Furniture
+        if (roomObjects != null)
+        {
+            var fill    = new Color32(97,  66, 40, 220);
+            var outline = new Color32(148, 107, 65, 255);
+            foreach (var obj in roomObjects)
+            {
+                if (obj?.position == null) continue;
+                float fw = obj.width > 0 ? obj.width : obj.radius * 2f;
+                float fd = obj.depth > 0 ? obj.depth : obj.radius * 2f;
+                var (x0, y0) = W2T(obj.position.x - fw * 0.5f, obj.position.z - fd * 0.5f);
+                var (x1, y1) = W2T(obj.position.x + fw * 0.5f, obj.position.z + fd * 0.5f);
+                if (x1 <= x0) x1 = x0 + 1;
+                if (y1 <= y0) y1 = y0 + 1;
+                TexFillRect(pixels, W, H, x0, y0, x1 - x0, y1 - y0, fill);
+                // 1-px outline
+                TexFillRect(pixels, W, H, x0, y0,      x1 - x0, 1, outline);
+                TexFillRect(pixels, W, H, x0, y1 - 1,  x1 - x0, 1, outline);
+                TexFillRect(pixels, W, H, x0, y0,      1, y1 - y0, outline);
+                TexFillRect(pixels, W, H, x1-1, y0,    1, y1 - y0, outline);
+            }
+        }
+
+        // Agents: forward arrow + filled circle
+        if (placements != null)
+        {
+            var agentColor  = new Color32(242, 128,  38, 255);
+            var arrowColor  = new Color32(255, 230, 100, 230);
+            foreach (var pl in placements)
+            {
+                if (pl?.position == null) continue;
+                var (cx, cy) = W2T(pl.position.x, pl.position.z);
+
+                // Forward arrow (0.8 m world units)
+                if (pl.forward != null && (Mathf.Abs(pl.forward.x) > 0.01f || Mathf.Abs(pl.forward.z) > 0.01f))
+                {
+                    var (tx, ty) = W2T(pl.position.x + pl.forward.x * 0.8f,
+                                       pl.position.z + pl.forward.z * 0.8f);
+                    TexDrawLine(pixels, W, H, cx, cy, tx, ty, 2, arrowColor);
+                }
+
+                TexFillCircle(pixels, W, H, cx, cy, 5, agentColor);
+            }
+        }
+
+        _previewTex.SetPixels32(pixels);
+        _previewTex.Apply();
+        Repaint();
+    }
+
     private void DrawPlacementPreview(
         RoomObjectSummary[] roomObjects,
         PlacementSummary[] placements,
-        string legend
+        RoomBounds roomBounds
     )
     {
-        const float previewSize = 260f;
-        var rect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.ExpandWidth(true));
-        EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
+        // Reserve layout space – texture is displayed here, fully inside the scroll view
+        var rect = GUILayoutUtility.GetRect(0f, 300f, GUILayout.ExpandWidth(true));
 
-        var positions = new List<Vector3Data>();
-        if (roomObjects != null)
+        if (_previewTex != null)
         {
-            foreach (var obj in roomObjects)
+            GUI.DrawTexture(rect, _previewTex, ScaleMode.ScaleToFit, false);
+        }
+        else
+        {
+            EditorGUI.DrawRect(rect, new Color(0.12f, 0.13f, 0.14f));
+            EditorGUI.LabelField(rect, "Keine Vorschau – Analyse ausführen.", EditorStyles.centeredGreyMiniLabel);
+        }
+
+        EditorGUILayout.LabelField(
+            "■ Möbel (2D-Schnitt 0,5 m)   ● Agent   ─ Blickrichtung",
+            EditorStyles.miniLabel
+        );
+
+        if (_previewTex != null && GUILayout.Button("Vorschau als PNG speichern"))
+        {
+            var path = EditorUtility.SaveFilePanel("Vorschau speichern", "", "placement_preview", "png");
+            if (!string.IsNullOrEmpty(path))
             {
-                if (obj?.position != null)
-                {
-                    positions.Add(obj.position);
-                }
+                System.IO.File.WriteAllBytes(path, _previewTex.EncodeToPNG());
+                EditorUtility.RevealInFinder(path);
             }
         }
-        if (placements != null)
+    }
+
+    // ── Texture pixel helpers ────────────────────────────────────────────
+
+    private static void GrowBounds(float x, float z,
+        ref float minX, ref float maxX, ref float minZ, ref float maxZ, ref bool any)
+    {
+        if (!any) { minX = maxX = x; minZ = maxZ = z; any = true; return; }
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+
+    private static void TexClearAndApply(Texture2D tex, int w, int h, Color32 color)
+    {
+        var pixels = new Color32[w * h];
+        for (int i = 0; i < pixels.Length; i++) pixels[i] = color;
+        tex.SetPixels32(pixels);
+        tex.Apply();
+    }
+
+    private static void TexFillRect(Color32[] pixels, int w, int h, int x, int y, int rw, int rh, Color32 color)
+    {
+        int x1 = Mathf.Clamp(x + rw, 0, w);
+        int y1 = Mathf.Clamp(y + rh, 0, h);
+        int x0 = Mathf.Clamp(x, 0, w);
+        int y0 = Mathf.Clamp(y, 0, h);
+        for (int py = y0; py < y1; py++)
+            for (int px = x0; px < x1; px++)
+                pixels[py * w + px] = color;
+    }
+
+    private static void TexFillCircle(Color32[] pixels, int w, int h, int cx, int cy, int r, Color32 color)
+    {
+        int r2 = r * r;
+        for (int dy = -r; dy <= r; dy++)
+        for (int dx = -r; dx <= r; dx++)
         {
-            foreach (var placement in placements)
-            {
-                if (placement?.position != null)
-                {
-                    positions.Add(placement.position);
-                }
-            }
+            if (dx * dx + dy * dy > r2) continue;
+            int px = cx + dx, py = cy + dy;
+            if (px >= 0 && px < w && py >= 0 && py < h)
+                pixels[py * w + px] = color;
         }
+    }
 
-        if (positions.Count == 0)
+    private static void TexDrawLine(Color32[] pixels, int w, int h, int x0, int y0, int x1, int y1, int thick, Color32 color)
+    {
+        int dx = Mathf.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+        int dy = -Mathf.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+        int err = dx + dy, half = thick / 2;
+        for (;;)
         {
-            GUI.Label(rect, "Keine Platzierungsdaten verfügbar.", EditorStyles.centeredGreyMiniLabel);
-            return;
+            TexFillRect(pixels, w, h, x0 - half, y0 - half, thick, thick, color);
+            if (x0 == x1 && y0 == y1) break;
+            int e2 = 2 * err;
+            if (e2 >= dy) { if (x0 == x1) break; err += dy; x0 += sx; }
+            if (e2 <= dx) { if (y0 == y1) break; err += dx; y0 += sy; }
         }
-
-        var minX = float.PositiveInfinity;
-        var maxX = float.NegativeInfinity;
-        var minZ = float.PositiveInfinity;
-        var maxZ = float.NegativeInfinity;
-        foreach (var pos in positions)
-        {
-            minX = Mathf.Min(minX, pos.x);
-            maxX = Mathf.Max(maxX, pos.x);
-            minZ = Mathf.Min(minZ, pos.z);
-            maxZ = Mathf.Max(maxZ, pos.z);
-        }
-
-        var spanX = Mathf.Max(1f, maxX - minX);
-        var spanZ = Mathf.Max(1f, maxZ - minZ);
-        var padding = 0.5f;
-        minX -= padding;
-        maxX += padding;
-        minZ -= padding;
-        maxZ += padding;
-        spanX = maxX - minX;
-        spanZ = maxZ - minZ;
-
-        var scale = Mathf.Min(rect.width / spanX, rect.height / spanZ);
-
-        Vector2 WorldToPreview(Vector3Data position)
-        {
-            var x = rect.x + (position.x - minX) * scale;
-            var z = rect.y + rect.height - (position.z - minZ) * scale;
-            return new Vector2(x, z);
-        }
-
-        Handles.BeginGUI();
-        if (roomObjects != null)
-        {
-            Handles.color = new Color(0.45f, 0.55f, 0.6f, 0.7f);
-            foreach (var obj in roomObjects)
-            {
-                if (obj?.position == null)
-                {
-                    continue;
-                }
-                var center = WorldToPreview(obj.position);
-                var radius = Mathf.Max(4f, obj.radius * scale);
-                Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, radius);
-            }
-        }
-
-        if (placements != null)
-        {
-            Handles.color = new Color(0.95f, 0.55f, 0.2f, 0.9f);
-            foreach (var placement in placements)
-            {
-                if (placement?.position == null)
-                {
-                    continue;
-                }
-                var center = WorldToPreview(placement.position);
-                Handles.DrawSolidDisc(new Vector3(center.x, center.y, 0f), Vector3.forward, 5f);
-            }
-        }
-        Handles.EndGUI();
-
-        var legendRect = GUILayoutUtility.GetRect(rect.width, 18f);
-        EditorGUI.LabelField(legendRect, legend, EditorStyles.miniLabel);
     }
 }
 #endif

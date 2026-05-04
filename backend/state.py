@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .kb import KnowledgeBase
 from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_tts_audio
-from .placement import assign_spawn_points, normalize_placement_preview, summarize_room_objects
+from .placement import assign_spawn_points, normalize_placement_preview, summarize_room_objects, mlds_slice_obstacles, _is_mlds
 from .projects import ProjectManager
 from .schemas import arrow_project_schema, npc_action_schema
 
@@ -593,11 +593,17 @@ class SessionStore:
                     "tags": placement.get("tags", []),
                 }
             )
+        fallback_room_objects = (
+            mlds_slice_obstacles(session.arrow_payload)
+            if _is_mlds(session.arrow_payload)
+            else summarize_room_objects(session.arrow_payload, floor_only=True)
+        )
         return {
             "status": "ok",
             "project": meta,
             "placements": placement_list,
-            "room_objects": placement_preview.get("room_objects") or summarize_room_objects(session.arrow_payload, floor_only=True),
+            "room_objects": placement_preview.get("room_objects") or fallback_room_objects,
+            "room_bounds": placement_preview.get("room_bounds"),
         }
 
     def _generate_arrow_draft(
