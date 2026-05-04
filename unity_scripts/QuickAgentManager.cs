@@ -51,6 +51,14 @@ public class QuickAgentManager : MonoBehaviour
     public float cameraLookSpeed = 2f;
     public float cameraLookClamp = 80f;
 
+    [Header("FPV-Modus")]
+    public KeyCode fpvToggleKey = KeyCode.F1;
+    public float fpvEyeHeight = 1.7f;
+
+    [Header("FPV-Interaktion")]
+    public float fpvInteractionRadius = 3f;
+    public KeyCode fpvChatKey = KeyCode.T;
+
     [Serializable]
     public class Vector3Data { public float x; public float y; public float z; }
 
@@ -197,6 +205,13 @@ public class QuickAgentManager : MonoBehaviour
     private float cameraYaw;
     private float cameraPitch;
     private bool cameraInitialized;
+    private bool _fpvActive;
+    private Vector3 _fpvSavedPos;
+    private Quaternion _fpvSavedRot;
+    private bool _fpvChatOpen;
+    private string _fpvChatInput = "";
+    private string _fpvNearestAgentId = "";
+    private const string FpvChatControlName = "fpvChatField";
 
     private void Start()
     {
@@ -206,15 +221,78 @@ public class QuickAgentManager : MonoBehaviour
 
     private void Update()
     {
+        CheckFpvToggle();
+        if (_fpvActive) UpdateFpvProximity();
         UpdateFreeMovement();
 
-        if (TryGetSelectPosition(out var screenPosition))
+        if (!_fpvActive && TryGetSelectPosition(out var screenPosition))
         {
             TrySelectAgentFromClick(screenPosition);
         }
 
         CleanupExpiredBubbles();
         UpdateHandoffLine();
+    }
+
+    private void CheckFpvToggle()
+    {
+        var pressed = false;
+#if ENABLE_INPUT_SYSTEM
+        var kb = Keyboard.current;
+        if (kb != null && kb.f1Key.wasPressedThisFrame) pressed = true;
+#elif ENABLE_LEGACY_INPUT_MANAGER
+        if (Input.GetKeyDown(fpvToggleKey)) pressed = true;
+#endif
+        if (pressed) ToggleFpv();
+    }
+
+    private void ToggleFpv()
+    {
+        var cam = Camera.main;
+        if (cam == null) return;
+
+        if (!_fpvActive)
+        {
+            _fpvSavedPos = cam.transform.position;
+            _fpvSavedRot = cam.transform.rotation;
+
+            cam.transform.position = ComputeRoomCenter();
+            cam.transform.rotation = Quaternion.identity;
+            cameraYaw   = 0f;
+            cameraPitch = 0f;
+            cameraInitialized = true;
+
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible   = false;
+            _fpvActive = true;
+        }
+        else
+        {
+            cam.transform.position = _fpvSavedPos;
+            cam.transform.rotation = _fpvSavedRot;
+
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible   = true;
+            _fpvActive        = false;
+            cameraInitialized = false;
+            _fpvChatOpen      = false;
+            _fpvChatInput     = "";
+            _fpvNearestAgentId = "";
+        }
+    }
+
+    private Vector3 ComputeRoomCenter()
+    {
+        var sum   = Vector3.zero;
+        var count = 0;
+        foreach (var v in agentObjects.Values)
+        {
+            if (v?.obj == null) continue;
+            sum += v.obj.transform.position;
+            count++;
+        }
+        var xz = count > 0 ? sum / count : Vector3.zero;
+        return new Vector3(xz.x, fpvEyeHeight, xz.z);
     }
 
     private void EnsureSceneBasics()
@@ -768,6 +846,14 @@ public class QuickAgentManager : MonoBehaviour
     private void OnGUI()
     {
         DrawAgentBubbles();
+
+        if (_fpvActive)
+        {
+            DrawFpvHud();
+            isChatInputFocused = _fpvChatOpen;
+            return;
+        }
+
         if (!showUi)
         {
             isChatInputFocused = false;
@@ -1336,7 +1422,12 @@ public class QuickAgentManager : MonoBehaviour
             return;
         }
 
-        if (isChatInputFocused)
+        if (isChatInputFocused && !_fpvActive)
+        {
+            return;
+        }
+
+        if (_fpvChatOpen)
         {
             return;
         }
@@ -1374,7 +1465,7 @@ public class QuickAgentManager : MonoBehaviour
         }
 
         var mouse = Mouse.current;
-        if (mouse != null && mouse.rightButton.isPressed)
+        if (mouse != null && (_fpvActive || mouse.rightButton.isPressed))
         {
             isLooking = true;
             lookDelta = mouse.delta.ReadValue();
@@ -1388,7 +1479,7 @@ public class QuickAgentManager : MonoBehaviour
         if (Input.GetKey(KeyCode.E)) move += Vector3.up;
         isBoost = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
 
-        if (Input.GetMouseButton(1))
+        if (_fpvActive || Input.GetMouseButton(1))
         {
             isLooking = true;
             lookDelta = new Vector2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"));
@@ -1405,9 +1496,203 @@ public class QuickAgentManager : MonoBehaviour
         if (move.sqrMagnitude > 0.001f)
         {
             var speed = cameraMoveSpeed * (isBoost ? cameraBoostMultiplier : 1f);
-            var direction = cam.transform.TransformDirection(move.normalized);
+            Vector3 direction;
+            if (_fpvActive)
+            {
+                // Horizontal movement (WASD) uses yaw only so height stays locked
+                var horizontal = Quaternion.Euler(0f, cameraYaw, 0f) * new Vector3(move.x, 0f, move.z);
+                var vertical   = new Vector3(0f, move.y, 0f);
+                direction = (horizontal + vertical).normalized;
+            }
+            else
+            {
+                direction = cam.transform.TransformDirection(move.normalized);
+            }
             cam.transform.position += direction * speed * Time.deltaTime;
         }
+    }
+
+    private void UpdateFpvProximity()
+    {
+        var cam = Camera.main;
+        if (cam == null) return;
+        var camPos = cam.transform.position;
+        var nearest = "";
+        var nearestDist = fpvInteractionRadius + 1f;
+
+        foreach (var pair in agentObjects)
+        {
+            if (pair.Value?.obj == null) continue;
+            var d = Vector3.Distance(camPos, pair.Value.obj.transform.position);
+            if (d < nearestDist) { nearestDist = d; nearest = pair.Key; }
+        }
+
+        if (nearestDist <= fpvInteractionRadius)
+        {
+            _fpvNearestAgentId = nearest;
+            if (!string.IsNullOrEmpty(nearest) && nearest != activeAgentId)
+                SetActiveAgentId(nearest);
+        }
+        else
+        {
+            _fpvNearestAgentId = "";
+            if (_fpvChatOpen)
+            {
+                _fpvChatOpen = false;
+                _fpvChatInput = "";
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+        }
+
+#if ENABLE_INPUT_SYSTEM
+        if (!string.IsNullOrEmpty(_fpvNearestAgentId))
+        {
+            var kb = Keyboard.current;
+            if (kb != null && kb.tKey.wasPressedThisFrame)
+                ToggleFpvChat();
+        }
+#elif ENABLE_LEGACY_INPUT_MANAGER
+        if (!string.IsNullOrEmpty(_fpvNearestAgentId) && Input.GetKeyDown(fpvChatKey))
+            ToggleFpvChat();
+#endif
+    }
+
+    private void ToggleFpvChat()
+    {
+        _fpvChatOpen = !_fpvChatOpen;
+        if (_fpvChatOpen)
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+        }
+        else
+        {
+            _fpvChatInput = "";
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
+    }
+
+    private void DrawFpvHud()
+    {
+        var sw = Screen.width;
+        var sh = Screen.height;
+
+        // Crosshair dot
+        if (!_fpvChatOpen)
+        {
+            const int dotSize = 6;
+            GUI.DrawTexture(
+                new Rect(sw * 0.5f - dotSize * 0.5f, sh * 0.5f - dotSize * 0.5f, dotSize, dotSize),
+                Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 0f, Color.white, 0f, 0f);
+        }
+
+        // Nearby agent nameplate
+        if (!string.IsNullOrEmpty(_fpvNearestAgentId))
+        {
+            var agentName = _fpvNearestAgentId;
+            if (lastAgents != null)
+            {
+                foreach (var a in lastAgents)
+                {
+                    if (a.id == _fpvNearestAgentId)
+                    {
+                        agentName = string.IsNullOrEmpty(a.display_name) ? a.id : a.display_name;
+                        break;
+                    }
+                }
+            }
+
+            var plateStyle = new GUIStyle(GUI.skin.box) { fontSize = 14, alignment = TextAnchor.MiddleCenter };
+            plateStyle.normal.textColor = Color.white;
+            var plateText = _fpvChatOpen
+                ? agentName
+                : $"{agentName}   [{fpvChatKey} = Chat öffnen]";
+            GUI.Box(new Rect(sw * 0.5f - 200f, sh * 0.5f + 40f, 400f, 28f), plateText, plateStyle);
+        }
+
+        // Chat overlay
+        if (_fpvChatOpen)
+        {
+            const float panelW = 560f;
+            const float panelH = 110f;
+            var panelX = sw * 0.5f - panelW * 0.5f;
+            var panelY = sh - panelH - 60f;
+
+            GUI.Box(new Rect(panelX - 4f, panelY - 4f, panelW + 8f, panelH + 8f), GUIContent.none);
+
+            var agentName = _fpvNearestAgentId;
+            if (lastAgents != null)
+            {
+                foreach (var a in lastAgents)
+                {
+                    if (a.id == _fpvNearestAgentId)
+                    {
+                        agentName = string.IsNullOrEmpty(a.display_name) ? a.id : a.display_name;
+                        break;
+                    }
+                }
+            }
+
+            var labelStyle = new GUIStyle(GUI.skin.label) { fontSize = 12 };
+            labelStyle.normal.textColor = new Color(0.8f, 0.8f, 0.8f);
+            GUI.Label(new Rect(panelX, panelY + 2f, panelW, 20f),
+                $"Gespräch mit: {agentName}  |  Enter = Senden  |  Esc = Schließen", labelStyle);
+
+            GUI.SetNextControlName(FpvChatControlName);
+            _fpvChatInput = GUI.TextField(
+                new Rect(panelX, panelY + 24f, panelW - 90f, 32f), _fpvChatInput, 512);
+            GUI.FocusControl(FpvChatControlName);
+
+            if (GUI.Button(new Rect(panelX + panelW - 86f, panelY + 24f, 86f, 32f), "Senden"))
+                SendFpvChat();
+
+            // Last two chat lines for context
+            var logStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
+            logStyle.normal.textColor = new Color(0.9f, 0.9f, 0.9f);
+            var recent = new List<string>();
+            for (var i = chatLog.Count - 1; i >= 0 && recent.Count < 2; i--)
+                recent.Insert(0, chatLog[i]);
+            GUI.Label(new Rect(panelX, panelY + 62f, panelW, 40f),
+                string.Join("\n", recent), logStyle);
+
+            var ev = Event.current;
+            if (ev.type == EventType.KeyDown)
+            {
+                if (ev.keyCode == KeyCode.Return || ev.keyCode == KeyCode.KeypadEnter)
+                {
+                    SendFpvChat();
+                    ev.Use();
+                }
+                else if (ev.keyCode == KeyCode.Escape)
+                {
+                    _fpvChatOpen = false;
+                    _fpvChatInput = "";
+                    Cursor.lockState = CursorLockMode.Locked;
+                    Cursor.visible = false;
+                    ev.Use();
+                }
+            }
+        }
+
+        // Bottom hint bar (hidden while chat is open)
+        if (!_fpvChatOpen)
+        {
+            var hudStyle = new GUIStyle(GUI.skin.box) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
+            hudStyle.normal.textColor = Color.white;
+            var hint = $"FPV-Modus  |  WASD = bewegen  QE = hoch/runter  Shift = schneller  |  {fpvToggleKey} = beenden";
+            GUI.Box(new Rect(sw * 0.5f - 320f, 8f, 640f, 26f), hint, hudStyle);
+        }
+    }
+
+    private void SendFpvChat()
+    {
+        var text = _fpvChatInput.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        chatLog.Add($"[Du] {text}");
+        _fpvChatInput = "";
+        StartCoroutine(SendChat(text));
     }
 
     [System.Serializable]
