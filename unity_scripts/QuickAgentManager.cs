@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using UnityEngine.Animations;
+using UnityEngine.Playables;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -34,6 +36,9 @@ public class QuickAgentManager : MonoBehaviour
     public float handoffDelay = 5f;
     public float handoffIndicatorDuration = 5f;
     public float handoffLineWidth = 0.06f;
+
+    [Header("Animation")]
+    public string animationResourceFolder = "Characters";
 
     [Header("TTS")]
     public bool enableTts = true;
@@ -147,6 +152,7 @@ public class QuickAgentManager : MonoBehaviour
         public Color baseColor;
         public float scale;
         public AudioSource audioSource;
+        public PlayableGraph animGraph;
     }
 
     private class BubbleInfo
@@ -355,12 +361,26 @@ public class QuickAgentManager : MonoBehaviour
     {
         foreach (var entry in agentObjects)
         {
-            if (entry.Value != null && entry.Value.obj != null)
+            if (entry.Value != null)
             {
-                Destroy(entry.Value.obj);
+                if (entry.Value.animGraph.IsValid())
+                    entry.Value.animGraph.Destroy();
+                if (entry.Value.obj != null)
+                    Destroy(entry.Value.obj);
             }
         }
         agentObjects.Clear();
+
+        var idleClips = LoadAllClipsFromFolder(animationResourceFolder);
+        if (idleClips.Length == 0)
+            Debug.LogWarning($"[QuickAgentManager] Keine AnimationClips in Resources/{animationResourceFolder} gefunden.");
+
+        var characterPrefabs = Resources.LoadAll<GameObject>("Characters");
+        var useCharacters = characterPrefabs != null && characterPrefabs.Length > 0;
+        if (!useCharacters)
+        {
+            Debug.LogWarning("[QuickAgentManager] Keine Prefabs in Resources/Characters – nutze Würfel als Fallback.");
+        }
 
         for (var i = 0; i < agents.Length; i++)
         {
@@ -370,35 +390,109 @@ public class QuickAgentManager : MonoBehaviour
 
             var pos = GetAgentSpawnPosition(agent);
 
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.name = $"Agent_{displayName}";
-            cube.transform.position = pos;
-            ApplyAgentForward(agent, cube.transform);
-            var scale = UnityEngine.Random.Range(boxScaleRange.x, boxScaleRange.y);
-            cube.transform.localScale = Vector3.one * scale;
+            GameObject agentGo;
+            Renderer mainRenderer;
+            float visualScale;
 
-            var renderer = cube.GetComponent<Renderer>();
-            var baseColor = Color.white;
-            if (renderer != null)
+            if (useCharacters)
             {
-                baseColor = Color.Lerp(new Color(0.3f, 0.6f, 1f), Color.white, 0.2f * i);
-                renderer.material.color = baseColor;
+                var prefab = characterPrefabs[UnityEngine.Random.Range(0, characterPrefabs.Length)];
+                agentGo = Instantiate(prefab, pos, Quaternion.identity);
+                agentGo.name = $"Agent_{displayName}";
+                ApplyAgentForward(agent, agentGo.transform);
+
+                // Capsule collider on root for click selection
+                if (agentGo.GetComponent<Collider>() == null)
+                {
+                    var cap = agentGo.AddComponent<CapsuleCollider>();
+                    cap.height = 1.8f;
+                    cap.radius = 0.3f;
+                    cap.center = new Vector3(0f, 0.9f, 0f);
+                }
+
+                // Small disc indicator below feet for active-agent highlighting
+                var indicator = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                indicator.name = "SelectionIndicator";
+                indicator.transform.SetParent(agentGo.transform, false);
+                indicator.transform.localPosition = new Vector3(0f, 0.02f, 0f);
+                indicator.transform.localScale = new Vector3(0.5f, 0.01f, 0.5f);
+                if (indicator.TryGetComponent<Collider>(out var indicatorCol))
+                    Destroy(indicatorCol);
+                mainRenderer = indicator.GetComponent<Renderer>();
+                visualScale = 1.8f;
+            }
+            else
+            {
+                agentGo = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                agentGo.name = $"Agent_{displayName}";
+                agentGo.transform.position = pos;
+                ApplyAgentForward(agent, agentGo.transform);
+                var scale = UnityEngine.Random.Range(boxScaleRange.x, boxScaleRange.y);
+                agentGo.transform.localScale = Vector3.one * scale;
+                mainRenderer = agentGo.GetComponent<Renderer>();
+                visualScale = scale;
             }
 
-            var audioSource = cube.AddComponent<AudioSource>();
+            var baseColor = Color.Lerp(new Color(0.3f, 0.6f, 1f), Color.white, 0.2f * i);
+            if (mainRenderer != null)
+            {
+                mainRenderer.material.color = baseColor;
+            }
+
+            var audioSource = agentGo.AddComponent<AudioSource>();
             audioSource.playOnAwake = false;
+
+            var idleClip = idleClips.Length > 0
+                ? idleClips[UnityEngine.Random.Range(0, idleClips.Length)]
+                : null;
+
+            var animGraph = new PlayableGraph();
+            if (useCharacters && idleClip != null)
+            {
+                var animator = agentGo.GetComponent<Animator>();
+                if (animator == null)
+                    animator = agentGo.AddComponent<Animator>();
+                animGraph = PlayableGraph.Create($"Idle_{id}");
+                var clipPlayable = AnimationClipPlayable.Create(animGraph, idleClip);
+                var output = AnimationPlayableOutput.Create(animGraph, "Idle", animator);
+                output.SetSourcePlayable(clipPlayable);
+                animGraph.SetTimeUpdateMode(DirectorUpdateMode.GameTime);
+                animGraph.Play();
+            }
 
             agentObjects[id] = new AgentVisual
             {
-                obj = cube,
-                renderer = renderer,
+                obj = agentGo,
+                renderer = mainRenderer,
                 baseColor = baseColor,
-                scale = scale,
-                audioSource = audioSource
+                scale = visualScale,
+                audioSource = audioSource,
+                animGraph = animGraph,
             };
         }
 
         UpdateAgentHighlights();
+    }
+
+    private AnimationClip[] LoadAllClipsFromFolder(string folder)
+    {
+        var assets = Resources.LoadAll<AnimationClip>(folder);
+        var result = new List<AnimationClip>();
+        foreach (var clip in assets)
+        {
+            if (!clip.name.StartsWith("__preview__"))
+                result.Add(clip);
+        }
+        return result.ToArray();
+    }
+
+    private void OnDestroy()
+    {
+        foreach (var entry in agentObjects)
+        {
+            if (entry.Value != null && entry.Value.animGraph.IsValid())
+                entry.Value.animGraph.Destroy();
+        }
     }
 
     private Vector3 GetAgentSpawnPosition(AgentPlacement agent)
@@ -460,16 +554,25 @@ public class QuickAgentManager : MonoBehaviour
         }
 
         var ray = cam.ScreenPointToRay(screenPosition);
-        if (Physics.Raycast(ray, out var hit))
+        if (!Physics.Raycast(ray, out var hit))
+        {
+            return;
+        }
+
+        // Walk up the hierarchy so clicks on child meshes of FBX characters still register
+        var hitTransform = hit.collider.transform;
+        while (hitTransform != null)
         {
             foreach (var pair in agentObjects)
             {
-                if (pair.Value != null && pair.Value.obj == hit.collider.gameObject)
+                if (pair.Value != null && pair.Value.obj != null
+                    && pair.Value.obj.transform == hitTransform)
                 {
                     SetActiveAgentId(pair.Key, true);
                     return;
                 }
             }
+            hitTransform = hitTransform.parent;
         }
     }
 
