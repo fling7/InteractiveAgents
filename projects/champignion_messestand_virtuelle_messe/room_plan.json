@@ -1,0 +1,822 @@
+{
+  "scene": {
+    "sceneName": "Cheese_Factory_TradeFair_Booth",
+    "environment": {
+      "type": "indoor",
+      "dimensions": {
+        "width": 15.0,
+        "height": 3.0,
+        "depth": 10.0
+      },
+      "lighting": [
+        {
+          "lightType": "ambient",
+          "intensity": 0.35,
+          "color": "#FFFFFF"
+        },
+        {
+          "lightType": "directional",
+          "intensity": 0.65,
+          "color": "#FFFFFF"
+        }
+      ],
+      "background": "#F7F3EE"
+    },
+    "objectGroups": {
+      "walls": {
+        "color": "#E0DDD9"
+      },
+      "floor": {
+        "color": "#D8D2CC"
+      },
+      "floor_markings": {
+        "color": "#C1A166"
+      },
+      "entrance": {
+        "color": "#B8AD99"
+      },
+      "branding": {
+        "color": "#B0945A"
+      },
+      "product_counters": {
+        "color": "#9CC6D8"
+      },
+      "product_pedestals": {
+        "color": "#F2F2F2"
+      },
+      "production_models": {
+        "color": "#8E8E8E"
+      },
+      "interactive": {
+        "color": "#EFE4B0"
+      },
+      "energy": {
+        "color": "#9DC89A"
+      },
+      "career": {
+        "color": "#D8C5E0"
+      },
+      "lounge": {
+        "color": "#C8B4A4"
+      }
+    },
+    "objects": [
+      {
+        "objectId": "floor",
+        "objectType": "floor",
+        "position": {
+          "x": 0.0,
+          "y": 0.05,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 15.0,
+          "height": 0.1,
+          "depth": 10.0
+        },
+        "group": "floor",
+        "specification": "A broad rectangular floor panel with subtle textured surface, finished in a warm neutral tone reminiscent of light wood, designed to cover the entire booth area and provide a durable and slip-resistant walking surface."
+      },
+      {
+        "objectId": "wall_front",
+        "objectType": "wall",
+        "position": {
+          "x": 0.0,
+          "y": 1.6,
+          "z": 4.95
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 15.0,
+          "height": 3.0,
+          "depth": 0.1
+        },
+        "group": "walls",
+        "specification": "A vertical wall panel standing three meters tall with a smooth matte finish in a warm neutral hue, adorned with tasteful branding graphics that blend traditional design elements with modern innovation, serving as an enclosing backdrop for the booth."
+      },
+      {
+        "objectId": "wall_back",
+        "objectType": "wall",
+        "position": {
+          "x": 0.0,
+          "y": 1.6,
+          "z": -4.95
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 15.0,
+          "height": 3.0,
+          "depth": 0.1
+        },
+        "group": "walls",
+        "specification": "A vertical wall panel standing three meters tall with a smooth matte finish in a warm neutral hue, adorned with tasteful branding graphics that blend traditional design elements with modern innovation, serving as an enclosing backdrop for the booth."
+      },
+      {
+        "objectId": "wall_left",
+        "objectType": "wall",
+        "position": {
+          "x": -7.45,
+          "y": 1.6,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 10.0,
+          "height": 3.0,
+          "depth": 0.1
+        },
+        "group": "walls",
+        "specification": "A vertical wall panel standing three meters tall with a smooth matte finish in a warm neutral hue, adorned with tasteful branding graphics that blend traditional design elements with modern innovation, serving as an enclosing backdrop for the booth."
+      },
+      {
+        "objectId": "wall_right",
+        "objectType": "wall",
+        "position": {
+          "x": 7.45,
+          "y": 1.6,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 10.0,
+          "height": 3.0,
+          "depth": 0.1
+        },
+        "group": "walls",
+        "specification": "A vertical wall panel standing three meters tall with a smooth matte finish in a warm neutral hue, adorned with tasteful branding graphics that blend traditional design elements with modern innovation, serving as an enclosing backdrop for the booth."
+      },
+      {
+        "objectId": "floor_marking_path1",
+        "objectType": "floor_marking",
+        "position": {
+          "x": 0.0,
+          "y": 0.105,
+          "z": 0.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.0,
+          "height": 0.01,
+          "depth": 9.8
+        },
+        "group": "floor_markings",
+        "specification": "A linear floor marking stripe with a contrasting warm neutral shade, finished with a durable paint to guide visitor circulation along the main pathway between exhibition zones."
+      },
+      {
+        "objectId": "reception_desk",
+        "objectType": "reception_desk",
+        "position": {
+          "x": 0.0,
+          "y": 0.6,
+          "z": 4.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 180.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 2.0,
+          "height": 1.0,
+          "depth": 1.0
+        },
+        "group": "entrance",
+        "specification": "A sleek reception desk measuring two meters wide by one meter deep and one meter high, featuring a minimalist design with a warm neutral wood veneer, integrated front-facing brand logo accent, and concealed storage compartments behind a smooth panel."
+      },
+      {
+        "objectId": "brand_panel1",
+        "objectType": "brand_panel",
+        "position": {
+          "x": -1.6,
+          "y": 1.1,
+          "z": 3.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 180.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 2.0,
+          "depth": 0.05
+        },
+        "group": "branding",
+        "specification": "A slim vertical brand information panel with a high-resolution printed graphic surface, framed in a warm neutral tone, featuring crisp typography and imagery that conveys the heritage and forward-looking spirit of the brand."
+      },
+      {
+        "objectId": "brand_panel2",
+        "objectType": "brand_panel",
+        "position": {
+          "x": 1.6,
+          "y": 1.1,
+          "z": 3.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 180.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 2.0,
+          "depth": 0.05
+        },
+        "group": "branding",
+        "specification": "A slim vertical brand information panel with a high-resolution printed graphic surface, framed in a warm neutral tone, featuring crisp typography and imagery that conveys the heritage and forward-looking spirit of the brand."
+      },
+      {
+        "objectId": "brand_panel3",
+        "objectType": "brand_panel",
+        "position": {
+          "x": -0.7,
+          "y": 1.1,
+          "z": 4.6
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 180.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.0,
+          "height": 2.0,
+          "depth": 0.05
+        },
+        "group": "branding",
+        "specification": "A slim vertical brand information panel with a high-resolution printed graphic surface, framed in a warm neutral tone, featuring crisp typography and imagery that conveys the heritage and forward-looking spirit of the brand."
+      },
+      {
+        "objectId": "brand_panel4",
+        "objectType": "brand_panel",
+        "position": {
+          "x": 0.7,
+          "y": 1.1,
+          "z": 4.6
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 180.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.0,
+          "height": 2.0,
+          "depth": 0.05
+        },
+        "group": "branding",
+        "specification": "A slim vertical brand information panel with a high-resolution printed graphic surface, framed in a warm neutral tone, featuring crisp typography and imagery that conveys the heritage and forward-looking spirit of the brand."
+      },
+      {
+        "objectId": "refrigerated_counter1",
+        "objectType": "refrigerated_counter",
+        "position": {
+          "x": -6.6,
+          "y": 0.6,
+          "z": 1.8
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 1.0,
+          "depth": 0.8
+        },
+        "group": "product_counters",
+        "specification": "A refrigerated display counter with a glass top and stainless steel base, featuring integrated LED lighting for product illumination and warm neutral accent panels to highlight cheese samples."
+      },
+      {
+        "objectId": "refrigerated_counter2",
+        "objectType": "refrigerated_counter",
+        "position": {
+          "x": -6.6,
+          "y": 0.6,
+          "z": 0.6
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 1.0,
+          "depth": 0.8
+        },
+        "group": "product_counters",
+        "specification": "A refrigerated display counter with a glass top and stainless steel base, featuring integrated LED lighting for product illumination and warm neutral accent panels to highlight cheese samples."
+      },
+      {
+        "objectId": "refrigerated_counter3",
+        "objectType": "refrigerated_counter",
+        "position": {
+          "x": -6.6,
+          "y": 0.6,
+          "z": -0.6
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 1.0,
+          "depth": 0.8
+        },
+        "group": "product_counters",
+        "specification": "A refrigerated display counter with a glass top and stainless steel base, featuring integrated LED lighting for product illumination and warm neutral accent panels to highlight cheese samples."
+      },
+      {
+        "objectId": "refrigerated_counter4",
+        "objectType": "refrigerated_counter",
+        "position": {
+          "x": -6.6,
+          "y": 0.6,
+          "z": -1.8
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 1.0,
+          "depth": 0.8
+        },
+        "group": "product_counters",
+        "specification": "A refrigerated display counter with a glass top and stainless steel base, featuring integrated LED lighting for product illumination and warm neutral accent panels to highlight cheese samples."
+      },
+      {
+        "objectId": "product_pedestal1",
+        "objectType": "product_pedestal",
+        "position": {
+          "x": -5.0,
+          "y": 0.6,
+          "z": 1.5
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 0.6,
+          "height": 1.0,
+          "depth": 0.6
+        },
+        "group": "product_pedestals",
+        "specification": "A compact product pedestal with a square top and slender column support, finished in a light neutral tone, designed to elevate individual cheese samples or packaged product visuals for clear viewing."
+      },
+      {
+        "objectId": "product_pedestal2",
+        "objectType": "product_pedestal",
+        "position": {
+          "x": -5.0,
+          "y": 0.6,
+          "z": 0.5
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 0.6,
+          "height": 1.0,
+          "depth": 0.6
+        },
+        "group": "product_pedestals",
+        "specification": "A compact product pedestal with a square top and slender column support, finished in a light neutral tone, designed to elevate individual cheese samples or packaged product visuals for clear viewing."
+      },
+      {
+        "objectId": "product_pedestal3",
+        "objectType": "product_pedestal",
+        "position": {
+          "x": -5.0,
+          "y": 0.6,
+          "z": -0.5
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 0.6,
+          "height": 1.0,
+          "depth": 0.6
+        },
+        "group": "product_pedestals",
+        "specification": "A compact product pedestal with a square top and slender column support, finished in a light neutral tone, designed to elevate individual cheese samples or packaged product visuals for clear viewing."
+      },
+      {
+        "objectId": "product_pedestal4",
+        "objectType": "product_pedestal",
+        "position": {
+          "x": -5.0,
+          "y": 0.6,
+          "z": -1.5
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 0.6,
+          "height": 1.0,
+          "depth": 0.6
+        },
+        "group": "product_pedestals",
+        "specification": "A compact product pedestal with a square top and slender column support, finished in a light neutral tone, designed to elevate individual cheese samples or packaged product visuals for clear viewing."
+      },
+      {
+        "objectId": "product_pedestal5",
+        "objectType": "product_pedestal",
+        "position": {
+          "x": -4.3,
+          "y": 0.6,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 0.6,
+          "height": 1.0,
+          "depth": 0.6
+        },
+        "group": "product_pedestals",
+        "specification": "A compact product pedestal with a square top and slender column support, finished in a light neutral tone, designed to elevate individual cheese samples or packaged product visuals for clear viewing."
+      },
+      {
+        "objectId": "product_pedestal6",
+        "objectType": "product_pedestal",
+        "position": {
+          "x": -4.3,
+          "y": 0.6,
+          "z": -1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 0.6,
+          "height": 1.0,
+          "depth": 0.6
+        },
+        "group": "product_pedestals",
+        "specification": "A compact product pedestal with a square top and slender column support, finished in a light neutral tone, designed to elevate individual cheese samples or packaged product visuals for clear viewing."
+      },
+      {
+        "objectId": "production_model1",
+        "objectType": "production_model",
+        "position": {
+          "x": 6.45,
+          "y": 0.85,
+          "z": 1.1
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 270.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 2.0,
+          "height": 1.5,
+          "depth": 1.0
+        },
+        "group": "production_models",
+        "specification": "A detailed large-scale production model replicating industrial cheese manufacturing equipment, crafted with metallic surfaces and nuanced texturing to showcase machinery components in a realistic factory style."
+      },
+      {
+        "objectId": "production_model2",
+        "objectType": "production_model",
+        "position": {
+          "x": 6.45,
+          "y": 0.85,
+          "z": -1.1
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 270.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 2.0,
+          "height": 1.5,
+          "depth": 1.0
+        },
+        "group": "production_models",
+        "specification": "A detailed large-scale production model replicating industrial cheese manufacturing equipment, crafted with metallic surfaces and nuanced texturing to showcase machinery components in a realistic factory style."
+      },
+      {
+        "objectId": "touch_kiosk1",
+        "objectType": "touch_kiosk",
+        "position": {
+          "x": 4.95,
+          "y": 0.7,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 270.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.0,
+          "height": 1.2,
+          "depth": 0.8
+        },
+        "group": "interactive",
+        "specification": "An interactive touchscreen kiosk standing 1.2 meters tall on a 1 by 0.8 meter base, with a sleek enclosure in a warm neutral shade, featuring a vertically mounted touch display and easy-access interface for visitor engagement."
+      },
+      {
+        "objectId": "touch_kiosk2",
+        "objectType": "touch_kiosk",
+        "position": {
+          "x": 4.95,
+          "y": 0.7,
+          "z": -1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 270.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.0,
+          "height": 1.2,
+          "depth": 0.8
+        },
+        "group": "interactive",
+        "specification": "An interactive touchscreen kiosk standing 1.2 meters tall on a 1 by 0.8 meter base, with a sleek enclosure in a warm neutral shade, featuring a vertically mounted touch display and easy-access interface for visitor engagement."
+      },
+      {
+        "objectId": "energy_station1",
+        "objectType": "energy_station",
+        "position": {
+          "x": -6.6,
+          "y": 0.85,
+          "z": 3.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 1.5,
+          "depth": 0.8
+        },
+        "group": "energy",
+        "specification": "An energy measurement station approximately 1.2 meters wide by 0.8 deep and 1.5 meters high, with digital display panels and control buttons integrated into a warm neutral housing, emphasizing sustainability data through clear visual feedback."
+      },
+      {
+        "objectId": "energy_station2",
+        "objectType": "energy_station",
+        "position": {
+          "x": -6.6,
+          "y": 0.85,
+          "z": 2.6
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 1.5,
+          "depth": 0.8
+        },
+        "group": "energy",
+        "specification": "An energy measurement station approximately 1.2 meters wide by 0.8 deep and 1.5 meters high, with digital display panels and control buttons integrated into a warm neutral housing, emphasizing sustainability data through clear visual feedback."
+      },
+      {
+        "objectId": "meeting_pod1",
+        "objectType": "meeting_pod",
+        "position": {
+          "x": 3.45,
+          "y": 1.2,
+          "z": 3.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 2.0,
+          "height": 2.2,
+          "depth": 2.0
+        },
+        "group": "career",
+        "specification": "A circular meeting pod with a two-meter diameter and 2.2 meters height, featuring semi-enclosed curved walls and comfortable upholstered seating in a warm neutral fabric, designed for private conversations within the career and training area."
+      },
+      {
+        "objectId": "meeting_pod2",
+        "objectType": "meeting_pod",
+        "position": {
+          "x": 3.45,
+          "y": 1.2,
+          "z": 1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 2.0,
+          "height": 2.2,
+          "depth": 2.0
+        },
+        "group": "career",
+        "specification": "A circular meeting pod with a two-meter diameter and 2.2 meters height, featuring semi-enclosed curved walls and comfortable upholstered seating in a warm neutral fabric, designed for private conversations within the career and training area."
+      },
+      {
+        "objectId": "meeting_pod3",
+        "objectType": "meeting_pod",
+        "position": {
+          "x": 3.45,
+          "y": 1.2,
+          "z": -1.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 2.0,
+          "height": 2.2,
+          "depth": 2.0
+        },
+        "group": "career",
+        "specification": "A circular meeting pod with a two-meter diameter and 2.2 meters height, featuring semi-enclosed curved walls and comfortable upholstered seating in a warm neutral fabric, designed for private conversations within the career and training area."
+      },
+      {
+        "objectId": "training_board1",
+        "objectType": "training_board",
+        "position": {
+          "x": 1.7,
+          "y": 1.0,
+          "z": 3.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 270.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.5,
+          "height": 1.8,
+          "depth": 0.08
+        },
+        "group": "career",
+        "specification": "An interactive training board standing 1.8 meters tall with a 1.5 by 0.08 meter panel, framed in a warm neutral tone, providing a touch-enabled surface for recruiting and training content with clear iconography."
+      },
+      {
+        "objectId": "training_board2",
+        "objectType": "training_board",
+        "position": {
+          "x": 1.7,
+          "y": 1.0,
+          "z": 1.5
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 270.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.5,
+          "height": 1.8,
+          "depth": 0.08
+        },
+        "group": "career",
+        "specification": "An interactive training board standing 1.8 meters tall with a 1.5 by 0.08 meter panel, framed in a warm neutral tone, providing a touch-enabled surface for recruiting and training content with clear iconography."
+      },
+      {
+        "objectId": "sofa1",
+        "objectType": "sofa",
+        "position": {
+          "x": 0.0,
+          "y": 0.55,
+          "z": -3.5
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 2.5,
+          "height": 0.9,
+          "depth": 1.0
+        },
+        "group": "lounge",
+        "specification": "A lounge sofa with a 2.5-meter-wide seating area and 0.9 meters tall backrest, upholstered in warm neutral fabric, featuring plush cushions and a low-profile modern design for relaxed networking."
+      },
+      {
+        "objectId": "lounge_table",
+        "objectType": "lounge_table",
+        "position": {
+          "x": 0.0,
+          "y": 0.4,
+          "z": -2.0
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 1.2,
+          "height": 0.6,
+          "depth": 0.6
+        },
+        "group": "lounge",
+        "specification": "A low-profile lounge table measuring 1.2 by 0.6 meters with a smooth wood-finish top in a warm neutral tone and sturdy base, suitable for casual seating arrangements."
+      },
+      {
+        "objectId": "chair1",
+        "objectType": "chair",
+        "position": {
+          "x": -1.0,
+          "y": 0.55,
+          "z": -2.5
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": 90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 0.8,
+          "height": 0.9,
+          "depth": 0.8
+        },
+        "group": "lounge",
+        "specification": "A single lounge chair with an ergonomic silhouette, upholstered in warm neutral material, with a cushioned seat and backrest supported by a minimalist frame."
+      },
+      {
+        "objectId": "chair2",
+        "objectType": "chair",
+        "position": {
+          "x": 1.0,
+          "y": 0.55,
+          "z": -2.5
+        },
+        "rotation": {
+          "x": 0.0,
+          "y": -90.0,
+          "z": 0.0
+        },
+        "dimensions": {
+          "width": 0.8,
+          "height": 0.9,
+          "depth": 0.8
+        },
+        "group": "lounge",
+        "specification": "A single lounge chair with an ergonomic silhouette, upholstered in warm neutral material, with a cushioned seat and backrest supported by a minimalist frame."
+      }
+    ]
+  }
+}

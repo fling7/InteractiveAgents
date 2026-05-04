@@ -255,6 +255,20 @@ def _agent_candidates_from_preview(preview_agents: Any) -> Dict[str, Dict[str, A
     return candidates
 
 
+def _clamp_to_bounds(
+    pos: Tuple[float, float, float],
+    bounds: Optional[Dict[str, float]],
+    *,
+    wall_margin: float = 0.5,
+) -> Tuple[float, float, float]:
+    """Clamp XZ position so the agent stays inside room bounds with a wall margin."""
+    if bounds is None:
+        return pos
+    x = max(bounds["min_x"] + wall_margin, min(bounds["max_x"] - wall_margin, pos[0]))
+    z = max(bounds["min_z"] + wall_margin, min(bounds["max_z"] - wall_margin, pos[2]))
+    return (x, 0.0, z)
+
+
 def _find_open_position(
     start: Tuple[float, float, float],
     room_objects: Sequence[Dict[str, Any]],
@@ -330,7 +344,7 @@ def normalize_placement_preview(
         if candidate and candidate.get("position"):
             pos = candidate["position"]
             start = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
-            resolved = _find_open_position(start, room_objects, placed_positions)
+            resolved = _clamp_to_bounds(_find_open_position(start, room_objects, placed_positions), bounds)
             placed_positions.append(resolved)
             forward = _mlds_forward_toward_center(resolved, center_z) if is_mlds else {"x": 0.0, "y": 0.0, "z": 1.0}
             agent_placements.append(
@@ -353,7 +367,7 @@ def normalize_placement_preview(
                 continue
             pos = placement["position"]
             start = (float(pos.get("x", 0.0)), 0.0, float(pos.get("z", 0.0)))
-            resolved = _find_open_position(start, room_objects, placed_positions)
+            resolved = _clamp_to_bounds(_find_open_position(start, room_objects, placed_positions), bounds)
             placed_positions.append(resolved)
             forward = _mlds_forward_toward_center(resolved, center_z) if is_mlds else placement.get("forward", {"x": 0.0, "y": 0.0, "z": 1.0})
             agent_placements.append(

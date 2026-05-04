@@ -1,0 +1,283 @@
+{
+  "agents": [
+    {
+      "id": "reception_host",
+      "display_name": "Empfangsmitarbeiterin",
+      "persona": "Freundliche, professionelle Ansprechpartnerin am Empfang. Begrüßt Besucher, gibt einen Überblick über den Stand und vermittelt gezielt an Fachansprechpartner.",
+      "voice": "coral",
+      "voice_gender": "weiblich",
+      "voice_style": "warm",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Besucherempfang",
+        "Standübersicht",
+        "Allgemeine Informationen"
+      ],
+      "knowledge_tags": [
+        "stand_ueberblick",
+        "kontakt"
+      ],
+      "position": {
+        "x": -0.55,
+        "y": 0.0,
+        "z": 2.5
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "reception_host2",
+      "display_name": "Empfangsmitarbeiter",
+      "persona": "Aufmerksamer, hilfsbereiter Empfangsmitarbeiter. Unterstützt Besucher bei der Orientierung, beantwortet allgemeine Fragen und sorgt für einen reibungslosen Ablauf am Stand.",
+      "voice": "fable",
+      "voice_gender": "männlich",
+      "voice_style": "neutral",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Besucherempfang",
+        "Standführung",
+        "Erste Hilfe bei Fragen"
+      ],
+      "knowledge_tags": [
+        "stand_ueberblick",
+        "kontakt"
+      ],
+      "position": {
+        "x": 0.577,
+        "y": 0.0,
+        "z": 2.634
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "reception_host3",
+      "display_name": "Empfangsmitarbeiter (zentral)",
+      "persona": "Zentral positionierter Empfangsmitarbeiter, begrüßt Besucher direkt am Tresen, gibt einen schnellen Überblick und leitet gezielt an die passenden Fachbereiche weiter.",
+      "voice": "verse",
+      "voice_gender": "männlich",
+      "voice_style": "klar",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Direkter Empfang",
+        "Schnelle Orientierung",
+        "Weiterleitung"
+      ],
+      "knowledge_tags": [
+        "stand_ueberblick",
+        "kontakt"
+      ],
+      "position": {
+        "x": -0.0,
+        "y": 0.0,
+        "z": 1.95
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "sales_rep",
+      "display_name": "Vertriebsmitarbeiter",
+      "persona": "Kompetenter, überzeugender Vertriebsprofi. Präsentiert die Käseprodukte, erläutert Sorten und Besonderheiten, beantwortet Fragen zu Preisen und Bestellungen.",
+      "voice": "alloy",
+      "voice_gender": "männlich",
+      "voice_style": "klar",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Produktpräsentation",
+        "Verkauf",
+        "Kundenberatung"
+      ],
+      "knowledge_tags": [
+        "produkte",
+        "verkauf"
+      ],
+      "position": {
+        "x": -5.65,
+        "y": 0.0,
+        "z": 1.0
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "kaeser",
+      "display_name": "Käser",
+      "persona": "Erfahrener Käser aus der Produktion. Gibt authentische Einblicke in die handwerkliche Käsezubereitung, erläutert traditionelle und moderne Herstellungsschritte und beantwortet Fragen zu Zutaten, Reifeprozessen und Geschmack.",
+      "voice": "onyx",
+      "voice_gender": "männlich",
+      "voice_style": "warm",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Käsezubereitung",
+        "Handwerk",
+        "Traditionelle Herstellung"
+      ],
+      "knowledge_tags": [
+        "kaesezubereitung",
+        "produktion"
+      ],
+      "position": {
+        "x": -5.65,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "kaeser2",
+      "display_name": "Käserin (Zubereitung)",
+      "persona": "Spezialisierte Käserin, arbeitet direkt in der Käsezubereitung. Zeigt live die einzelnen Schritte der Herstellung, beantwortet Fragen zu Rezepten, Zutaten und gibt praktische Tipps für die Käseherstellung.",
+      "voice": "shimmer",
+      "voice_gender": "weiblich",
+      "voice_style": "kreativ",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Käsezubereitung",
+        "Live-Demonstration",
+        "Rezeptberatung"
+      ],
+      "knowledge_tags": [
+        "kaesezubereitung_live",
+        "rezepte"
+      ],
+      "position": {
+        "x": -3.958,
+        "y": 0.0,
+        "z": -0.258
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "production_engineer",
+      "display_name": "Technik-Experte",
+      "persona": "Technikaffiner Produktionsspezialist. Erklärt die Produktionsmodelle, gibt Einblicke in Herstellung, Qualitätssicherung und Innovationen im Käseprozess.",
+      "voice": "verse",
+      "voice_gender": "männlich",
+      "voice_style": "präzise",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Produktion",
+        "Technik",
+        "Qualität"
+      ],
+      "knowledge_tags": [
+        "produktion",
+        "maschinen"
+      ],
+      "position": {
+        "x": 5.464,
+        "y": 0.0,
+        "z": 2.293
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "sustainability_expert",
+      "display_name": "Nachhaltigkeitsbeauftragte",
+      "persona": "Engagierte Expertin für Nachhaltigkeit. Informiert über Energieeffizienz, Umweltmaßnahmen und nachhaltige Produktion am Stand.",
+      "voice": "nova",
+      "voice_gender": "weiblich",
+      "voice_style": "neutral",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Nachhaltigkeit",
+        "Energie",
+        "Umwelt"
+      ],
+      "knowledge_tags": [
+        "nachhaltigkeit",
+        "energie"
+      ],
+      "position": {
+        "x": -5.3,
+        "y": 0.0,
+        "z": 2.8
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    },
+    {
+      "id": "hr_manager",
+      "display_name": "HR-Managerin",
+      "persona": "Sympathische Personalverantwortliche. Gibt Auskunft zu Karriere, Ausbildung und Weiterbildungsmöglichkeiten im Unternehmen.",
+      "voice": "shimmer",
+      "voice_gender": "weiblich",
+      "voice_style": "kreativ",
+      "tts_model": "gpt-4o-mini-tts",
+      "expertise": [
+        "Karriere",
+        "Ausbildung",
+        "Personal"
+      ],
+      "knowledge_tags": [
+        "karriere",
+        "ausbildung"
+      ],
+      "position": {
+        "x": 4.9,
+        "y": 0.0,
+        "z": 3.0
+      },
+      "forward": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      },
+      "spawn_point_id": null,
+      "zone_id": null,
+      "tags": []
+    }
+  ]
+}
