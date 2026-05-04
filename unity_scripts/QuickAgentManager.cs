@@ -58,6 +58,7 @@ public class QuickAgentManager : MonoBehaviour
     [Header("FPV-Interaktion")]
     public float fpvInteractionRadius = 3f;
     public KeyCode fpvChatKey = KeyCode.T;
+    public bool fpvProximityHandoff = true;
 
     [Serializable]
     public class Vector3Data { public float x; public float y; public float z; }
@@ -209,8 +210,11 @@ public class QuickAgentManager : MonoBehaviour
     private Vector3 _fpvSavedPos;
     private Quaternion _fpvSavedRot;
     private bool _fpvChatOpen;
+    private bool _fpvChatJustOpened;
     private string _fpvChatInput = "";
     private string _fpvNearestAgentId = "";
+    private string _pendingHandoffAgentId = "";
+    private ChatEvent[] _pendingHandoffEvents;
     private const string FpvChatControlName = "fpvChatField";
 
     private void Start()
@@ -223,6 +227,7 @@ public class QuickAgentManager : MonoBehaviour
     {
         CheckFpvToggle();
         if (_fpvActive) UpdateFpvProximity();
+        UpdatePendingAgentPulse();
         UpdateFreeMovement();
 
         if (!_fpvActive && TryGetSelectPosition(out var screenPosition))
@@ -276,8 +281,17 @@ public class QuickAgentManager : MonoBehaviour
             _fpvActive        = false;
             cameraInitialized = false;
             _fpvChatOpen      = false;
+            _fpvChatJustOpened = false;
             _fpvChatInput     = "";
             _fpvNearestAgentId = "";
+            if (!string.IsNullOrEmpty(_pendingHandoffAgentId)
+                && agentObjects.TryGetValue(_pendingHandoffAgentId, out var pv) && pv?.renderer != null)
+            {
+                pv.renderer.material.SetColor("_EmissionColor", Color.black);
+                pv.renderer.material.DisableKeyword("_EMISSION");
+            }
+            _pendingHandoffAgentId = "";
+            _pendingHandoffEvents  = null;
         }
     }
 
@@ -694,9 +708,24 @@ public class QuickAgentManager : MonoBehaviour
 
             var resp = JsonUtility.FromJson<ChatResponse>(req.downloadHandler.text);
             sessionId = resp.session_id;
-            SetActiveAgentId(resp.active_agent_id);
-            AppendChatEvents(resp.events);
-            StartCoroutine(ShowChatBubbles(resp));
+
+            var isHandoff = resp.handoff != null && !string.IsNullOrEmpty(resp.handoff.to);
+            if (isHandoff && _fpvActive && fpvProximityHandoff)
+            {
+                // From-agent events go to log now; to-agent events are deferred until arrival
+                var fromEvents = FilterEvents(resp.events, resp.handoff.from, include: true);
+                var toEvents   = FilterEvents(resp.events, resp.handoff.from, include: false);
+                AppendChatEvents(fromEvents);
+                _pendingHandoffAgentId = resp.active_agent_id;
+                _pendingHandoffEvents  = toEvents;
+                StartCoroutine(ShowHandoffOnly(resp, fromEvents));
+            }
+            else
+            {
+                SetActiveAgentId(resp.active_agent_id);
+                AppendChatEvents(resp.events);
+                StartCoroutine(ShowChatBubbles(resp));
+            }
         }
     }
 
@@ -1082,6 +1111,67 @@ public class QuickAgentManager : MonoBehaviour
             SetBubble(ev.agent_id, text, bubbleDuration);
             StartCoroutine(PlayAgentSpeech(ev.agent_id, text));
             yield return new WaitForSeconds(bubbleStagger);
+        }
+    }
+
+    private IEnumerator ShowHandoffOnly(ChatResponse resp, ChatEvent[] fromEvents)
+    {
+        if (resp.handoff == null) yield break;
+
+        // Show forwarding agent's own speech immediately
+        foreach (var ev in fromEvents)
+        {
+            var text = NormalizeChatText(ev.text);
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            SetBubble(ev.agent_id, text, bubbleDuration);
+            StartCoroutine(PlayAgentSpeech(ev.agent_id, text));
+            yield return new WaitForSeconds(bubbleStagger);
+        }
+
+        // Then show the forwarding indicator
+        var handoffText = $"Leitet weiter an {resp.handoff.to}";
+        if (!string.IsNullOrWhiteSpace(resp.handoff.reason))
+            handoffText = $"{handoffText}\n{resp.handoff.reason}";
+        SetBubble(resp.handoff.from, handoffText, handoffIndicatorDuration);
+        ShowHandoffLine(resp.handoff.from, resp.handoff.to, handoffIndicatorDuration + handoffDelay);
+        yield return new WaitForSeconds(handoffIndicatorDuration + handoffDelay);
+        ClearBubble(resp.handoff.from);
+    }
+
+    private static ChatEvent[] FilterEvents(ChatEvent[] events, string agentId, bool include)
+    {
+        if (events == null) return Array.Empty<ChatEvent>();
+        var result = new List<ChatEvent>();
+        foreach (var e in events)
+            if (include ? e.agent_id == agentId : e.agent_id != agentId)
+                result.Add(e);
+        return result.ToArray();
+    }
+
+    private void TriggerPendingHandoffArrival()
+    {
+        var agentId = _pendingHandoffAgentId;
+        var events  = _pendingHandoffEvents;
+
+        // Reset emission before clearing pending state
+        if (agentObjects.TryGetValue(agentId, out var visual) && visual?.renderer != null)
+        {
+            visual.renderer.material.SetColor("_EmissionColor", Color.black);
+            visual.renderer.material.DisableKeyword("_EMISSION");
+        }
+
+        _pendingHandoffAgentId = "";
+        _pendingHandoffEvents  = null;
+        SetActiveAgentId(agentId);
+        if (events != null && events.Length > 0)
+        {
+            AppendChatEvents(events);
+            StartCoroutine(ShowChatBubbles(new ChatResponse
+            {
+                session_id      = sessionId,
+                active_agent_id = agentId,
+                events          = events
+            }));
         }
     }
 
@@ -1512,6 +1602,17 @@ public class QuickAgentManager : MonoBehaviour
         }
     }
 
+    private void UpdatePendingAgentPulse()
+    {
+        if (string.IsNullOrEmpty(_pendingHandoffAgentId)) return;
+        if (!agentObjects.TryGetValue(_pendingHandoffAgentId, out var visual) || visual?.renderer == null) return;
+        var pulse = Mathf.Sin(Time.time * 4f) * 0.5f + 0.5f;
+        var emissive = activeAgentColor * (pulse * 2.5f);
+        var mat = visual.renderer.material;
+        mat.EnableKeyword("_EMISSION");
+        mat.SetColor("_EmissionColor", emissive);
+    }
+
     private void UpdateFpvProximity()
     {
         var cam = Camera.main;
@@ -1530,8 +1631,15 @@ public class QuickAgentManager : MonoBehaviour
         if (nearestDist <= fpvInteractionRadius)
         {
             _fpvNearestAgentId = nearest;
-            if (!string.IsNullOrEmpty(nearest) && nearest != activeAgentId)
+            // Trigger pending handoff arrival before auto-switching active agent
+            if (!string.IsNullOrEmpty(_pendingHandoffAgentId) && nearest == _pendingHandoffAgentId)
+            {
+                TriggerPendingHandoffArrival();
+            }
+            else if (!string.IsNullOrEmpty(nearest) && nearest != activeAgentId)
+            {
                 SetActiveAgentId(nearest);
+            }
         }
         else
         {
@@ -1546,14 +1654,14 @@ public class QuickAgentManager : MonoBehaviour
         }
 
 #if ENABLE_INPUT_SYSTEM
-        if (!string.IsNullOrEmpty(_fpvNearestAgentId))
+        if (!string.IsNullOrEmpty(_fpvNearestAgentId) && !_fpvChatOpen)
         {
             var kb = Keyboard.current;
             if (kb != null && kb.tKey.wasPressedThisFrame)
                 ToggleFpvChat();
         }
 #elif ENABLE_LEGACY_INPUT_MANAGER
-        if (!string.IsNullOrEmpty(_fpvNearestAgentId) && Input.GetKeyDown(fpvChatKey))
+        if (!string.IsNullOrEmpty(_fpvNearestAgentId) && !_fpvChatOpen && Input.GetKeyDown(fpvChatKey))
             ToggleFpvChat();
 #endif
     }
@@ -1563,6 +1671,7 @@ public class QuickAgentManager : MonoBehaviour
         _fpvChatOpen = !_fpvChatOpen;
         if (_fpvChatOpen)
         {
+            _fpvChatJustOpened = true;
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
@@ -1572,6 +1681,56 @@ public class QuickAgentManager : MonoBehaviour
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
         }
+    }
+
+    private void DrawFpvDirectionArrow()
+    {
+        if (string.IsNullOrEmpty(_pendingHandoffAgentId)) return;
+        if (!agentObjects.TryGetValue(_pendingHandoffAgentId, out var visual) || visual?.obj == null) return;
+
+        var cam = Camera.main;
+        if (cam == null) return;
+
+        var sw = Screen.width;
+        var sh = Screen.height;
+        var center = new Vector2(sw * 0.5f, sh * 0.5f);
+
+        // Agent position slightly above feet for better aim
+        var agentWorldPos = visual.obj.transform.position + Vector3.up * 1.0f;
+        var screenPos = cam.WorldToScreenPoint(agentWorldPos);
+        var isBehind = screenPos.z < 0f;
+
+        // Convert to IMGUI coords (Y flipped)
+        var guiPos = new Vector2(screenPos.x, sh - screenPos.y);
+        var dir = isBehind ? (center - guiPos).normalized : (guiPos - center).normalized;
+        if (dir.sqrMagnitude < 0.001f) dir = Vector2.up;
+
+        // Angle: ▲ points toward -Y in IMGUI ("up"), rotate clockwise to match direction
+        var angle = Mathf.Atan2(dir.x, -dir.y) * Mathf.Rad2Deg;
+
+        const float radius   = 130f;
+        const float arrowSize = 38f;
+        var arrowCenter = center + dir * radius;
+
+        var pulse = Mathf.Sin(Time.time * 3f) * 0.3f + 0.7f;
+        var oldColor = GUI.color;
+        GUI.color = new Color(1f, 1f, 1f, pulse);
+
+        var savedMatrix = GUI.matrix;
+        GUIUtility.RotateAroundPivot(angle, arrowCenter);
+
+        var style = new GUIStyle(GUI.skin.label)
+        {
+            fontSize  = 30,
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleCenter,
+        };
+        style.normal.textColor = new Color(1f, 0.88f, 0.1f);
+        GUI.Label(new Rect(arrowCenter.x - arrowSize * 0.5f, arrowCenter.y - arrowSize * 0.5f,
+            arrowSize, arrowSize), "▲", style);
+
+        GUI.matrix = savedMatrix;
+        GUI.color = oldColor;
     }
 
     private void DrawFpvHud()
@@ -1587,6 +1746,9 @@ public class QuickAgentManager : MonoBehaviour
                 new Rect(sw * 0.5f - dotSize * 0.5f, sh * 0.5f - dotSize * 0.5f, dotSize, dotSize),
                 Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 0f, Color.white, 0f, 0f);
         }
+
+        // Direction arrow toward pending handoff agent
+        DrawFpvDirectionArrow();
 
         // Nearby agent nameplate
         if (!string.IsNullOrEmpty(_fpvNearestAgentId))
@@ -1604,11 +1766,17 @@ public class QuickAgentManager : MonoBehaviour
                 }
             }
 
+            var isPendingArrival = _fpvNearestAgentId == _pendingHandoffAgentId
+                                   && !string.IsNullOrEmpty(_pendingHandoffAgentId);
             var plateStyle = new GUIStyle(GUI.skin.box) { fontSize = 14, alignment = TextAnchor.MiddleCenter };
-            plateStyle.normal.textColor = Color.white;
-            var plateText = _fpvChatOpen
-                ? agentName
-                : $"{agentName}   [{fpvChatKey} = Chat öffnen]";
+            plateStyle.normal.textColor = isPendingArrival ? new Color(1f, 0.85f, 0.2f) : Color.white;
+            string plateText;
+            if (_fpvChatOpen)
+                plateText = agentName;
+            else if (isPendingArrival)
+                plateText = $"★  {agentName}  —  wartet auf dich";
+            else
+                plateText = $"{agentName}   [{fpvChatKey} = Chat öffnen]";
             GUI.Box(new Rect(sw * 0.5f - 200f, sh * 0.5f + 40f, 400f, 28f), plateText, plateStyle);
         }
 
@@ -1619,6 +1787,26 @@ public class QuickAgentManager : MonoBehaviour
             const float panelH = 110f;
             var panelX = sw * 0.5f - panelW * 0.5f;
             var panelY = sh - panelH - 60f;
+
+            // Handle Enter / Esc BEFORE the TextField consumes the event
+            var ev = Event.current;
+            if (ev.type == EventType.KeyDown)
+            {
+                if (ev.keyCode == KeyCode.Return || ev.keyCode == KeyCode.KeypadEnter)
+                {
+                    SendFpvChat();
+                    ev.Use();
+                }
+                else if (ev.keyCode == KeyCode.Escape)
+                {
+                    _fpvChatOpen = false;
+                    _fpvChatInput = "";
+                    Cursor.lockState = CursorLockMode.Locked;
+                    Cursor.visible = false;
+                    ev.Use();
+                    return; // skip rest of HUD this frame
+                }
+            }
 
             GUI.Box(new Rect(panelX - 4f, panelY - 4f, panelW + 8f, panelH + 8f), GUIContent.none);
 
@@ -1643,7 +1831,13 @@ public class QuickAgentManager : MonoBehaviour
             GUI.SetNextControlName(FpvChatControlName);
             _fpvChatInput = GUI.TextField(
                 new Rect(panelX, panelY + 24f, panelW - 90f, 32f), _fpvChatInput, 512);
-            GUI.FocusControl(FpvChatControlName);
+
+            // Request focus only on the frame the chat was opened
+            if (_fpvChatJustOpened)
+            {
+                GUI.FocusControl(FpvChatControlName);
+                _fpvChatJustOpened = false;
+            }
 
             if (GUI.Button(new Rect(panelX + panelW - 86f, panelY + 24f, 86f, 32f), "Senden"))
                 SendFpvChat();
@@ -1656,24 +1850,39 @@ public class QuickAgentManager : MonoBehaviour
                 recent.Insert(0, chatLog[i]);
             GUI.Label(new Rect(panelX, panelY + 62f, panelW, 40f),
                 string.Join("\n", recent), logStyle);
+        }
 
-            var ev = Event.current;
-            if (ev.type == EventType.KeyDown)
+        // Pending handoff indicator — pulsing banner when target is not yet in range
+        if (!string.IsNullOrEmpty(_pendingHandoffAgentId) && _fpvNearestAgentId != _pendingHandoffAgentId)
+        {
+            var pendingName = _pendingHandoffAgentId;
+            if (lastAgents != null)
             {
-                if (ev.keyCode == KeyCode.Return || ev.keyCode == KeyCode.KeypadEnter)
+                foreach (var a in lastAgents)
                 {
-                    SendFpvChat();
-                    ev.Use();
-                }
-                else if (ev.keyCode == KeyCode.Escape)
-                {
-                    _fpvChatOpen = false;
-                    _fpvChatInput = "";
-                    Cursor.lockState = CursorLockMode.Locked;
-                    Cursor.visible = false;
-                    ev.Use();
+                    if (a.id == _pendingHandoffAgentId)
+                    {
+                        pendingName = string.IsNullOrEmpty(a.display_name) ? a.id : a.display_name;
+                        break;
+                    }
                 }
             }
+
+            var pulse = Mathf.Sin(Time.time * 3f) * 0.25f + 0.75f;
+            var oldColor = GUI.color;
+            GUI.color = new Color(1f, 1f, 1f, pulse);
+
+            var pendingStyle = new GUIStyle(GUI.skin.box)
+            {
+                fontSize  = 16,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+            };
+            pendingStyle.normal.textColor = new Color(1f, 0.9f, 0.1f);
+            GUI.Box(new Rect(sw * 0.5f - 300f, 40f, 600f, 36f),
+                $"★   {pendingName} wartet auf dich  —  lauf hin!   ★", pendingStyle);
+
+            GUI.color = oldColor;
         }
 
         // Bottom hint bar (hidden while chat is open)
