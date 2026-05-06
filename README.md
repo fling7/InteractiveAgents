@@ -107,6 +107,24 @@ Antwort enthält eine `events`‑Liste, z.B. bei Handoff:
 }
 ```
 
+### POST `/stt`
+Speech-to-Text für Mikrofonaufnahmen. Unity sendet ein Multipart-Formular:
+- Feld `audio`: WAV/MP3/WebM/etc.
+- Feld `model` optional, Standard aus `config.json` (`whisper-1`)
+- Feld `language` optional, Standard `de`
+
+Antwort:
+```json
+{
+  "text": "Was kostet euer Produkt?",
+  "model": "whisper-1",
+  "language": "de"
+}
+```
+
+### POST `/tts`
+Text-to-Speech für Agentenantworten. `QuickAgentManager.cs` nutzt diesen Endpunkt automatisch, wenn `Enable Tts` aktiv ist.
+
 ---
 
 ## 5) Unity-Skripte
@@ -114,7 +132,7 @@ Antwort enthält eine `events`‑Liste, z.B. bei Handoff:
 Unter `unity_scripts/` liegen **Beispiel‑C#‑Skripte** (kein komplettes Unity‑Projekt).
 - `BackendClient.cs`: REST‑Calls zu `/setup` und `/chat`
 - `AgentSpawnPoint.cs`: markiert Spawnpoints im Raum (optional)
-- `QuickAgentManager.cs`: **alles‑in‑einem** Script für ein leeres Unity‑Projekt (GUI, Setup, Spawning, Chat)
+- `QuickAgentManager.cs`: **alles‑in‑einem** Script für ein leeres Unity‑Projekt (GUI, Setup, Spawning, Chat, Voice Input, TTS)
 - `AgentManagerExample.cs`: Beispiel‑Controller, der `BackendClient` nutzt und Agenten spawnt
 - `ProjectManagerUI.cs`: Editor‑Fenster für Projekte/Agenten/Wissen (Unity‑Menüpunkt)
 - `RoomPlanExporter.cs`: exportiert Spawnpoints aus der Szene als `room_plan.json`
@@ -133,6 +151,7 @@ Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
 - Für jeden Agenten wird eine **zufällige Box** in der Szene erstellt.
 - Im **Play‑Modus** kannst du die Agenten auswählen (Linksklick auf Box oder per UI‑Liste).
 - Über das UI kannst du Chat‑Nachrichten senden.
+- Für echte Sprachdialoge: Taste `V` halten, sprechen, loslassen. Unity transkribiert die Aufnahme über `/stt`, sendet den Text an `/chat`, und die Agentenantwort wird per `/tts` abgespielt.
 
 **Wichtige Felder im Inspector**
 - `Backend Base Url`: URL des Backends (Standard `http://127.0.0.1:8787`).
@@ -154,6 +173,15 @@ Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
 **UI**
 - **Show Ui**: Ein-/Ausblenden des Ingame-UI.
 - **Ui Rect**: Position/Größe des UI-Containers (Screen-Koordinaten).
+
+**Voice Input**
+- **Enable Voice Input**: Aktiviert Push-to-Talk per Mikrofon.
+- **Voice Record Key**: Taste für Aufnahme halten (Standard `V`).
+- **Voice Max Record Seconds**: Maximale Dauer pro Aufnahme.
+- **Voice Sample Rate**: Sample-Rate für WAV-Aufnahmen (Standard 16000).
+- **Stt Model**: Speech-to-Text-Modell für `/stt` (Standard `whisper-1`).
+- **Stt Language**: Sprache für Transkription (Standard `de`; leer lassen für Auto-Erkennung).
+- **Send Voice Transcript Automatically**: Transkript direkt an den aktiven Agenten senden.
 
 **Agent Visuals**
 - **Active Agent Color**: Highlight-Farbe für den aktuell aktiven Agenten.
@@ -182,6 +210,7 @@ Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
 - **Setup erneut vom Server**: Startet `POST /setup` (mit Projekt oder Pfaden).
 - **Agenten wählen**: Setzt den aktiven Agenten (auch per Linksklick auf Box).
 - **Chat senden**: Sendet `POST /chat` an den aktiven Agenten.
+- **Voice senden**: `V` halten oder Button **Voice aufnehmen** nutzen; das Transkript wird automatisch gesendet.
 
 ### Nutzung der zusätzlichen Skripte
 Die folgenden Schritte zeigen, wie du die **neuen Skripte** in ein bestehendes Unity‑Projekt einbaust:
@@ -248,6 +277,9 @@ Die folgenden Schritte zeigen, wie du die **neuen Skripte** in ein bestehendes U
 - `model`: Standard ist `gpt-4.1` (kannst du ändern)
 - `temperature`: Standard 0.3
 - `server_port`: Standard 8787
+- `stt_model`: Standard `whisper-1` für Speech-to-Text (`/stt`)
+- `stt_language`: Standard `de`; leer lassen für Auto-Erkennung
+- `stt_max_audio_bytes`: Upload-Limit für Mikrofon-Audio (Default 25 MB)
 
 ---
 

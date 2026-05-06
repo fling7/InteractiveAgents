@@ -10,5 +10,8 @@
   "kb_chunk_chars": 900,
   "kb_max_snippets": 4,
   "temperature": 0.3,
-  "timeout_seconds": 60
+  "timeout_seconds": 60,
+  "stt_model": "whisper-1",
+  "stt_language": "de",
+  "stt_max_audio_bytes": 26214400
 }

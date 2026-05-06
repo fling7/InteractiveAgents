@@ -30,7 +30,8 @@ public class QuickAgentManager : MonoBehaviour
     [Header("Agent Visuals")]
     public Color activeAgentColor = new Color(1f, 0.85f, 0.2f);
     public float activeAgentEmission = 0.6f;
-    public float bubbleHeight = 0.6f;
+    public bool showAgentBubbles = true;
+    public float bubbleHeight = 1.7f;
     public float bubbleDuration = 15f;
     public float bubbleStagger = 5f;
     public float handoffDelay = 5f;
@@ -44,6 +45,15 @@ public class QuickAgentManager : MonoBehaviour
     public bool enableTts = true;
     public float ttsCooldownSeconds = 0.5f;
 
+    [Header("Voice Input")]
+    public bool enableVoiceInput = true;
+    public KeyCode voiceRecordKey = KeyCode.V;
+    public float voiceMaxRecordSeconds = 10f;
+    public int voiceSampleRate = 16000;
+    public string sttModel = "whisper-1";
+    public string sttLanguage = "de";
+    public bool sendVoiceTranscriptAutomatically = true;
+
     [Header("Camera Movement")]
     public bool enableFreeMovement = true;
     public float cameraMoveSpeed = 4f;
@@ -54,11 +64,18 @@ public class QuickAgentManager : MonoBehaviour
     [Header("FPV-Modus")]
     public KeyCode fpvToggleKey = KeyCode.F1;
     public float fpvEyeHeight = 1.7f;
+    [Range(0.2f, 6f)]
+    public float fpvMouseSensitivity = 2f;
 
     [Header("FPV-Interaktion")]
     public float fpvInteractionRadius = 3f;
     public KeyCode fpvChatKey = KeyCode.T;
     public bool fpvProximityHandoff = true;
+
+    [Header("FPV-Richtungspfeil")]
+    public float fpvDirectionArrowRadius = 130f;
+    public float fpvDirectionArrowSize = 58f;
+    public Color fpvDirectionArrowTint = new Color(1f, 0.84f, 0.08f);
 
     [Serializable]
     public class Vector3Data { public float x; public float y; public float z; }
@@ -150,6 +167,14 @@ public class QuickAgentManager : MonoBehaviour
         public string tts_model;
     }
 
+    [Serializable]
+    public class SttResponse
+    {
+        public string text;
+        public string model;
+        public string language;
+    }
+
     [Header("Runtime")]
     public string sessionId;
     public string activeAgentId;
@@ -184,6 +209,11 @@ public class QuickAgentManager : MonoBehaviour
     private readonly HashSet<string> ttsInFlight = new HashSet<string>();
     private readonly Dictionary<string, float> ttsLastRequest = new Dictionary<string, float>();
     private readonly List<string> chatLog = new List<string>();
+    private AudioClip voiceRecordingClip;
+    private string voiceRecordingDevice;
+    private bool isVoiceRecording;
+    private bool sttInFlight;
+    private float voiceRecordingStartedAt;
     private AgentPlacement[] lastAgents;
     private string statusMessage = "";
     private string chatInput = "";
@@ -197,6 +227,7 @@ public class QuickAgentManager : MonoBehaviour
     private ProjectSummary[] projects = Array.Empty<ProjectSummary>();
     private int selectedProjectIndex = -1;
     private string selectedProjectId = "";
+    private Texture2D fpvDirectionArrowTexture;
     private GUIStyle bubbleStyle;
     private GUIStyle bubblePointerStyle;
     private LineRenderer handoffLine;
@@ -216,6 +247,7 @@ public class QuickAgentManager : MonoBehaviour
     private string _pendingHandoffAgentId = "";
     private ChatEvent[] _pendingHandoffEvents;
     private const string FpvChatControlName = "fpvChatField";
+    private const float InputSystemMouseDeltaScale = 0.05f;
 
     private void Start()
     {
@@ -226,6 +258,7 @@ public class QuickAgentManager : MonoBehaviour
     private void Update()
     {
         CheckFpvToggle();
+        HandleVoiceInput();
         if (_fpvActive) UpdateFpvProximity();
         UpdatePendingAgentPulse();
         UpdateFreeMovement();
@@ -284,14 +317,7 @@ public class QuickAgentManager : MonoBehaviour
             _fpvChatJustOpened = false;
             _fpvChatInput     = "";
             _fpvNearestAgentId = "";
-            if (!string.IsNullOrEmpty(_pendingHandoffAgentId)
-                && agentObjects.TryGetValue(_pendingHandoffAgentId, out var pv) && pv?.renderer != null)
-            {
-                pv.renderer.material.SetColor("_EmissionColor", Color.black);
-                pv.renderer.material.DisableKeyword("_EMISSION");
-            }
-            _pendingHandoffAgentId = "";
-            _pendingHandoffEvents  = null;
+            ClearPendingHandoff();
         }
     }
 
@@ -585,6 +611,9 @@ public class QuickAgentManager : MonoBehaviour
             if (entry.Value != null && entry.Value.animGraph.IsValid())
                 entry.Value.animGraph.Destroy();
         }
+
+        if (fpvDirectionArrowTexture != null)
+            Destroy(fpvDirectionArrowTexture);
     }
 
     private Vector3 GetAgentSpawnPosition(AgentPlacement agent)
@@ -716,8 +745,7 @@ public class QuickAgentManager : MonoBehaviour
                 var fromEvents = FilterEvents(resp.events, resp.handoff.from, include: true);
                 var toEvents   = FilterEvents(resp.events, resp.handoff.from, include: false);
                 AppendChatEvents(fromEvents);
-                _pendingHandoffAgentId = resp.active_agent_id;
-                _pendingHandoffEvents  = toEvents;
+                SetPendingHandoff(resp, toEvents);
                 StartCoroutine(ShowHandoffOnly(resp, fromEvents));
             }
             else
@@ -1007,6 +1035,27 @@ public class QuickAgentManager : MonoBehaviour
         {
             TrySendChatFromInput();
         }
+        if (enableVoiceInput)
+        {
+            GUILayout.BeginHorizontal();
+            if (isVoiceRecording)
+            {
+                if (GUILayout.Button("Aufnahme stoppen + senden"))
+                {
+                    StopVoiceRecordingAndSend();
+                }
+                GUILayout.Label("Aufnahme laeuft...");
+            }
+            else
+            {
+                if (GUILayout.Button("Voice aufnehmen"))
+                {
+                    StartVoiceRecording();
+                }
+                GUILayout.Label(sttInFlight ? "Transkription laeuft..." : $"{voiceRecordKey} halten = sprechen");
+            }
+            GUILayout.EndHorizontal();
+        }
         if (GUILayout.Button("Chat leeren"))
         {
             chatLog.Clear();
@@ -1020,6 +1069,9 @@ public class QuickAgentManager : MonoBehaviour
         GUILayout.Space(6);
         GUILayout.Label("Interaktion: Linksklick auf Box wählt Agenten.");
         GUILayout.Label("Freie Kamera: WASD + QE, rechte Maustaste zum Umschauen.");
+        GUILayout.Space(6);
+        GUILayout.Label($"FPV Maussensitivitaet: {fpvMouseSensitivity:0.00}");
+        fpvMouseSensitivity = GUILayout.HorizontalSlider(fpvMouseSensitivity, 0.2f, 6f);
         GUILayout.EndScrollView();
         GUILayout.EndArea();
     }
@@ -1085,7 +1137,8 @@ public class QuickAgentManager : MonoBehaviour
             }
 
             SetBubble(resp.handoff.from, handoffText, handoffIndicatorDuration);
-            ShowHandoffLine(resp.handoff.from, resp.handoff.to, handoffIndicatorDuration + handoffDelay);
+            ShowHandoffLine(ResolveAgentId(resp.handoff.from), ResolveAgentId(resp.handoff.to),
+                handoffIndicatorDuration + handoffDelay);
             yield return new WaitForSeconds(handoffIndicatorDuration + handoffDelay);
             ClearBubble(resp.handoff.from);
         }
@@ -1133,7 +1186,8 @@ public class QuickAgentManager : MonoBehaviour
         if (!string.IsNullOrWhiteSpace(resp.handoff.reason))
             handoffText = $"{handoffText}\n{resp.handoff.reason}";
         SetBubble(resp.handoff.from, handoffText, handoffIndicatorDuration);
-        ShowHandoffLine(resp.handoff.from, resp.handoff.to, handoffIndicatorDuration + handoffDelay);
+        ShowHandoffLine(ResolveAgentId(resp.handoff.from), ResolveAgentId(resp.handoff.to),
+            handoffIndicatorDuration + handoffDelay);
         yield return new WaitForSeconds(handoffIndicatorDuration + handoffDelay);
         ClearBubble(resp.handoff.from);
     }
@@ -1153,15 +1207,7 @@ public class QuickAgentManager : MonoBehaviour
         var agentId = _pendingHandoffAgentId;
         var events  = _pendingHandoffEvents;
 
-        // Reset emission before clearing pending state
-        if (agentObjects.TryGetValue(agentId, out var visual) && visual?.renderer != null)
-        {
-            visual.renderer.material.SetColor("_EmissionColor", Color.black);
-            visual.renderer.material.DisableKeyword("_EMISSION");
-        }
-
-        _pendingHandoffAgentId = "";
-        _pendingHandoffEvents  = null;
+        ClearPendingHandoff();
         SetActiveAgentId(agentId);
         if (events != null && events.Length > 0)
         {
@@ -1175,6 +1221,96 @@ public class QuickAgentManager : MonoBehaviour
         }
     }
 
+    private void SetPendingHandoff(ChatResponse resp, ChatEvent[] targetEvents)
+    {
+        var targetAgentId = ResolvePendingHandoffTargetId(resp);
+        if (string.IsNullOrEmpty(targetAgentId) || !agentObjects.ContainsKey(targetAgentId))
+        {
+            ClearPendingHandoff();
+            statusMessage = "Weiterleitungsziel nicht gefunden.";
+            return;
+        }
+
+        if (!string.Equals(_pendingHandoffAgentId, targetAgentId, StringComparison.Ordinal))
+            ClearPendingHandoff();
+
+        _pendingHandoffAgentId = targetAgentId;
+        _pendingHandoffEvents = targetEvents;
+        statusMessage = $"Weiterleitung zu: {GetAgentDisplayName(targetAgentId)}";
+    }
+
+    private string ResolvePendingHandoffTargetId(ChatResponse resp)
+    {
+        if (resp == null)
+            return "";
+
+        var fromId = ResolveAgentId(resp.handoff?.from);
+        var handoffTarget = ResolveAgentId(resp.handoff?.to);
+        if (!string.IsNullOrEmpty(handoffTarget) && agentObjects.ContainsKey(handoffTarget))
+            return handoffTarget;
+
+        var activeTarget = ResolveAgentId(resp.active_agent_id);
+        if (!string.IsNullOrEmpty(activeTarget)
+            && agentObjects.ContainsKey(activeTarget)
+            && !string.Equals(activeTarget, fromId, StringComparison.Ordinal))
+        {
+            return activeTarget;
+        }
+
+        return "";
+    }
+
+    private string ResolveAgentId(string agentRef)
+    {
+        if (string.IsNullOrWhiteSpace(agentRef))
+            return "";
+
+        var trimmed = agentRef.Trim();
+        if (agentObjects.ContainsKey(trimmed))
+            return trimmed;
+
+        if (lastAgents != null)
+        {
+            foreach (var agent in lastAgents)
+            {
+                if (agent == null)
+                    continue;
+
+                if (string.Equals(agent.id, trimmed, StringComparison.Ordinal)
+                    || string.Equals(agent.display_name, trimmed, StringComparison.OrdinalIgnoreCase))
+                {
+                    return agent.id;
+                }
+            }
+        }
+
+        return trimmed;
+    }
+
+    private string GetAgentDisplayName(string agentId)
+    {
+        if (lastAgents != null)
+        {
+            foreach (var agent in lastAgents)
+            {
+                if (agent != null && string.Equals(agent.id, agentId, StringComparison.Ordinal))
+                    return string.IsNullOrEmpty(agent.display_name) ? agent.id : agent.display_name;
+            }
+        }
+
+        return agentId;
+    }
+
+    private void ClearPendingHandoff()
+    {
+        if (string.IsNullOrEmpty(_pendingHandoffAgentId) && _pendingHandoffEvents == null)
+            return;
+
+        _pendingHandoffAgentId = "";
+        _pendingHandoffEvents = null;
+        UpdateAgentHighlights();
+    }
+
     private void SetBubble(string agentId, string text, float duration)
     {
         if (string.IsNullOrWhiteSpace(agentId))
@@ -1182,6 +1318,7 @@ public class QuickAgentManager : MonoBehaviour
             return;
         }
 
+        showAgentBubbles = true;
         agentBubbles[agentId] = new BubbleInfo
         {
             text = text,
@@ -1224,6 +1361,11 @@ public class QuickAgentManager : MonoBehaviour
 
     private void DrawAgentBubbles()
     {
+        if (!showAgentBubbles)
+        {
+            return;
+        }
+
         if (agentBubbles.Count == 0)
         {
             return;
@@ -1492,6 +1634,321 @@ public class QuickAgentManager : MonoBehaviour
         }
     }
 
+    private void HandleVoiceInput()
+    {
+        if (!enableVoiceInput)
+        {
+            return;
+        }
+
+        if (isVoiceRecording)
+        {
+            if (WasVoiceRecordKeyReleasedThisFrame()
+                || Time.time - voiceRecordingStartedAt >= Mathf.Max(1f, voiceMaxRecordSeconds))
+            {
+                StopVoiceRecordingAndSend();
+            }
+            return;
+        }
+
+        if (sttInFlight || !CanStartVoiceRecordingFromKeyboard())
+        {
+            return;
+        }
+
+        if (WasVoiceRecordKeyPressedThisFrame())
+        {
+            StartVoiceRecording();
+        }
+    }
+
+    private bool CanStartVoiceRecordingFromKeyboard()
+    {
+        if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(activeAgentId))
+        {
+            return false;
+        }
+
+        if (_fpvChatOpen)
+        {
+            return false;
+        }
+
+        if (!_fpvActive && isChatInputFocused)
+        {
+            return false;
+        }
+
+        if (_fpvActive && string.IsNullOrEmpty(_fpvNearestAgentId))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private void StartVoiceRecording()
+    {
+        if (sttInFlight)
+        {
+            statusMessage = "Transkription laeuft bereits.";
+            return;
+        }
+
+        if (Microphone.devices == null || Microphone.devices.Length == 0)
+        {
+            statusMessage = "Kein Mikrofon gefunden.";
+            chatLog.Add(statusMessage);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(activeAgentId))
+        {
+            statusMessage = "Kein aktiver Agent fuer Voice Chat.";
+            return;
+        }
+
+        voiceRecordingDevice = Microphone.devices[0];
+        var seconds = Mathf.CeilToInt(Mathf.Max(1f, voiceMaxRecordSeconds));
+        var sampleRate = Mathf.Clamp(voiceSampleRate, 8000, 48000);
+        voiceRecordingClip = Microphone.Start(voiceRecordingDevice, false, seconds, sampleRate);
+        if (voiceRecordingClip == null)
+        {
+            statusMessage = "Mikrofonaufnahme konnte nicht gestartet werden.";
+            return;
+        }
+
+        isVoiceRecording = true;
+        voiceRecordingStartedAt = Time.time;
+        statusMessage = $"Aufnahme laeuft... {voiceRecordKey} loslassen zum Senden.";
+    }
+
+    private void StopVoiceRecordingAndSend()
+    {
+        if (!isVoiceRecording)
+        {
+            return;
+        }
+
+        var clip = voiceRecordingClip;
+        var device = voiceRecordingDevice;
+        var samplePosition = 0;
+        if (!string.IsNullOrEmpty(device))
+        {
+            samplePosition = Microphone.GetPosition(device);
+            if (Microphone.IsRecording(device))
+            {
+                Microphone.End(device);
+            }
+        }
+
+        isVoiceRecording = false;
+        voiceRecordingClip = null;
+        voiceRecordingDevice = "";
+
+        if (clip == null)
+        {
+            statusMessage = "Aufnahme fehlgeschlagen.";
+            return;
+        }
+
+        var elapsed = Mathf.Clamp(Time.time - voiceRecordingStartedAt, 0f, Mathf.Max(1f, voiceMaxRecordSeconds));
+        var elapsedSamples = Mathf.RoundToInt(elapsed * clip.frequency);
+        var sampleFrames = samplePosition > 0 ? samplePosition : elapsedSamples;
+        sampleFrames = Mathf.Clamp(sampleFrames, 0, clip.samples);
+
+        if (sampleFrames < Mathf.RoundToInt(clip.frequency * 0.2f))
+        {
+            statusMessage = "Aufnahme zu kurz.";
+            return;
+        }
+
+        var samples = new float[sampleFrames * clip.channels];
+        clip.GetData(samples, 0);
+        var wav = EncodeWav(samples, sampleFrames, clip.channels, clip.frequency);
+        StartCoroutine(TranscribeVoiceAndSend(wav));
+    }
+
+    private IEnumerator TranscribeVoiceAndSend(byte[] wavBytes)
+    {
+        if (wavBytes == null || wavBytes.Length == 0)
+        {
+            statusMessage = "Keine Audiodaten fuer Transkription.";
+            yield break;
+        }
+
+        sttInFlight = true;
+        statusMessage = "Transkription laeuft...";
+
+        var url = $"{backendBaseUrl}/stt";
+        var form = new WWWForm();
+        form.AddBinaryData("audio", wavBytes, "voice.wav", "audio/wav");
+        if (!string.IsNullOrWhiteSpace(sttModel))
+        {
+            form.AddField("model", sttModel);
+        }
+        if (!string.IsNullOrWhiteSpace(sttLanguage))
+        {
+            form.AddField("language", sttLanguage);
+        }
+
+        using (var req = UnityWebRequest.Post(url, form))
+        {
+            yield return req.SendWebRequest();
+            sttInFlight = false;
+
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                statusMessage = "Transkription fehlgeschlagen: " + req.error;
+                chatLog.Add(statusMessage + " | " + req.downloadHandler.text);
+                yield break;
+            }
+
+            var resp = JsonUtility.FromJson<SttResponse>(req.downloadHandler.text);
+            var transcript = resp == null ? "" : (resp.text ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(transcript))
+            {
+                statusMessage = "Keine Sprache erkannt.";
+                chatLog.Add(statusMessage);
+                yield break;
+            }
+
+            statusMessage = "Transkription OK.";
+            if (sendVoiceTranscriptAutomatically)
+            {
+                chatLog.Add($"[Du/Voice] {transcript}");
+                StartCoroutine(SendChat(transcript));
+            }
+            else
+            {
+                chatInput = transcript;
+                statusMessage = "Transkript ins Chatfeld uebernommen.";
+            }
+        }
+    }
+
+    private static byte[] EncodeWav(float[] samples, int sampleFrames, int channels, int frequency)
+    {
+        channels = Mathf.Max(1, channels);
+        frequency = Mathf.Max(8000, frequency);
+        var sampleCount = Mathf.Clamp(sampleFrames * channels, 0, samples == null ? 0 : samples.Length);
+        var dataSize = sampleCount * 2;
+        var bytes = new byte[44 + dataSize];
+
+        WriteAscii(bytes, 0, "RIFF");
+        WriteInt32(bytes, 4, 36 + dataSize);
+        WriteAscii(bytes, 8, "WAVE");
+        WriteAscii(bytes, 12, "fmt ");
+        WriteInt32(bytes, 16, 16);
+        WriteInt16(bytes, 20, 1);
+        WriteInt16(bytes, 22, (short)channels);
+        WriteInt32(bytes, 24, frequency);
+        WriteInt32(bytes, 28, frequency * channels * 2);
+        WriteInt16(bytes, 32, (short)(channels * 2));
+        WriteInt16(bytes, 34, 16);
+        WriteAscii(bytes, 36, "data");
+        WriteInt32(bytes, 40, dataSize);
+
+        var offset = 44;
+        for (var i = 0; i < sampleCount; i++)
+        {
+            var value = Mathf.Clamp(samples[i], -1f, 1f);
+            var pcm = (short)Mathf.RoundToInt(value * short.MaxValue);
+            bytes[offset++] = (byte)(pcm & 0xff);
+            bytes[offset++] = (byte)((pcm >> 8) & 0xff);
+        }
+
+        return bytes;
+    }
+
+    private static void WriteAscii(byte[] bytes, int offset, string value)
+    {
+        for (var i = 0; i < value.Length; i++)
+        {
+            bytes[offset + i] = (byte)value[i];
+        }
+    }
+
+    private static void WriteInt16(byte[] bytes, int offset, short value)
+    {
+        bytes[offset] = (byte)(value & 0xff);
+        bytes[offset + 1] = (byte)((value >> 8) & 0xff);
+    }
+
+    private static void WriteInt32(byte[] bytes, int offset, int value)
+    {
+        bytes[offset] = (byte)(value & 0xff);
+        bytes[offset + 1] = (byte)((value >> 8) & 0xff);
+        bytes[offset + 2] = (byte)((value >> 16) & 0xff);
+        bytes[offset + 3] = (byte)((value >> 24) & 0xff);
+    }
+
+    private bool WasVoiceRecordKeyPressedThisFrame()
+    {
+#if ENABLE_INPUT_SYSTEM
+        if (TryGetInputSystemKeyControl(voiceRecordKey, out var control))
+            return control.wasPressedThisFrame;
+        return false;
+#elif ENABLE_LEGACY_INPUT_MANAGER
+        return Input.GetKeyDown(voiceRecordKey);
+#else
+        return false;
+#endif
+    }
+
+    private bool WasVoiceRecordKeyReleasedThisFrame()
+    {
+#if ENABLE_INPUT_SYSTEM
+        if (TryGetInputSystemKeyControl(voiceRecordKey, out var control))
+            return control.wasReleasedThisFrame;
+        return false;
+#elif ENABLE_LEGACY_INPUT_MANAGER
+        return Input.GetKeyUp(voiceRecordKey);
+#else
+        return false;
+#endif
+    }
+
+#if ENABLE_INPUT_SYSTEM
+    private static bool TryGetInputSystemKeyControl(
+        KeyCode keyCode,
+        out UnityEngine.InputSystem.Controls.KeyControl control)
+    {
+        control = null;
+        var keyboard = Keyboard.current;
+        if (keyboard == null)
+        {
+            return false;
+        }
+
+        var name = keyCode.ToString();
+        if (keyCode == KeyCode.Return)
+            name = "Enter";
+        else if (keyCode == KeyCode.BackQuote)
+            name = "Backquote";
+        else if (keyCode == KeyCode.LeftControl)
+            name = "LeftCtrl";
+        else if (keyCode == KeyCode.RightControl)
+            name = "RightCtrl";
+
+        if (!Enum.TryParse<UnityEngine.InputSystem.Key>(name, true, out var inputKey))
+        {
+            return false;
+        }
+
+        try
+        {
+            control = keyboard[inputKey];
+            return control != null;
+        }
+        catch
+        {
+            control = null;
+            return false;
+        }
+    }
+#endif
+
     private void TrySendChatFromInput()
     {
         if (string.IsNullOrWhiteSpace(chatInput))
@@ -1578,8 +2035,13 @@ public class QuickAgentManager : MonoBehaviour
 
         if (isLooking)
         {
-            cameraYaw += lookDelta.x * cameraLookSpeed;
-            cameraPitch = Mathf.Clamp(cameraPitch - lookDelta.y * cameraLookSpeed, -cameraLookClamp, cameraLookClamp);
+            var lookSpeed = _fpvActive ? fpvMouseSensitivity : cameraLookSpeed;
+#if ENABLE_INPUT_SYSTEM
+            if (_fpvActive)
+                lookSpeed *= InputSystemMouseDeltaScale;
+#endif
+            cameraYaw += lookDelta.x * lookSpeed;
+            cameraPitch = Mathf.Clamp(cameraPitch - lookDelta.y * lookSpeed, -cameraLookClamp, cameraLookClamp);
             cam.transform.rotation = Quaternion.Euler(cameraPitch, cameraYaw, 0f);
         }
 
@@ -1618,6 +2080,26 @@ public class QuickAgentManager : MonoBehaviour
         var cam = Camera.main;
         if (cam == null) return;
         var camPos = cam.transform.position;
+
+        if (!string.IsNullOrEmpty(_pendingHandoffAgentId))
+        {
+            if (agentObjects.TryGetValue(_pendingHandoffAgentId, out var pendingVisual)
+                && pendingVisual?.obj != null
+                && Vector3.Distance(camPos, pendingVisual.obj.transform.position) <= fpvInteractionRadius)
+            {
+                _fpvNearestAgentId = _pendingHandoffAgentId;
+                TriggerPendingHandoffArrival();
+            }
+            else
+            {
+                _fpvNearestAgentId = "";
+                CloseFpvChat();
+            }
+
+            HandleFpvChatKey();
+            return;
+        }
+
         var nearest = "";
         var nearestDist = fpvInteractionRadius + 1f;
 
@@ -1631,12 +2113,7 @@ public class QuickAgentManager : MonoBehaviour
         if (nearestDist <= fpvInteractionRadius)
         {
             _fpvNearestAgentId = nearest;
-            // Trigger pending handoff arrival before auto-switching active agent
-            if (!string.IsNullOrEmpty(_pendingHandoffAgentId) && nearest == _pendingHandoffAgentId)
-            {
-                TriggerPendingHandoffArrival();
-            }
-            else if (!string.IsNullOrEmpty(nearest) && nearest != activeAgentId)
+            if (!string.IsNullOrEmpty(nearest) && nearest != activeAgentId)
             {
                 SetActiveAgentId(nearest);
             }
@@ -1644,15 +2121,14 @@ public class QuickAgentManager : MonoBehaviour
         else
         {
             _fpvNearestAgentId = "";
-            if (_fpvChatOpen)
-            {
-                _fpvChatOpen = false;
-                _fpvChatInput = "";
-                Cursor.lockState = CursorLockMode.Locked;
-                Cursor.visible = false;
-            }
+            CloseFpvChat();
         }
 
+        HandleFpvChatKey();
+    }
+
+    private void HandleFpvChatKey()
+    {
 #if ENABLE_INPUT_SYSTEM
         if (!string.IsNullOrEmpty(_fpvNearestAgentId) && !_fpvChatOpen)
         {
@@ -1664,6 +2140,17 @@ public class QuickAgentManager : MonoBehaviour
         if (!string.IsNullOrEmpty(_fpvNearestAgentId) && !_fpvChatOpen && Input.GetKeyDown(fpvChatKey))
             ToggleFpvChat();
 #endif
+    }
+
+    private void CloseFpvChat()
+    {
+        if (!_fpvChatOpen)
+            return;
+
+        _fpvChatOpen = false;
+        _fpvChatInput = "";
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
     }
 
     private void ToggleFpvChat()
@@ -1695,42 +2182,183 @@ public class QuickAgentManager : MonoBehaviour
         var sh = Screen.height;
         var center = new Vector2(sw * 0.5f, sh * 0.5f);
 
-        // Agent position slightly above feet for better aim
-        var agentWorldPos = visual.obj.transform.position + Vector3.up * 1.0f;
-        var screenPos = cam.WorldToScreenPoint(agentWorldPos);
-        var isBehind = screenPos.z < 0f;
+        var dir = GetFpvHorizontalGuiDirection(visual.obj.transform.position, cam, out var signedAngle);
+        if (dir.sqrMagnitude < 0.001f) return;
 
-        // Convert to IMGUI coords (Y flipped)
-        var guiPos = new Vector2(screenPos.x, sh - screenPos.y);
-        var dir = isBehind ? (center - guiPos).normalized : (guiPos - center).normalized;
-        if (dir.sqrMagnitude < 0.001f) dir = Vector2.up;
-
-        // Angle: ▲ points toward -Y in IMGUI ("up"), rotate clockwise to match direction
         var angle = Mathf.Atan2(dir.x, -dir.y) * Mathf.Rad2Deg;
+        var indicatorColor = GetFpvDirectionArrowColor(signedAngle, fpvDirectionArrowTint);
 
-        const float radius   = 130f;
-        const float arrowSize = 38f;
+        var arrowSize = Mathf.Clamp(fpvDirectionArrowSize, 36f, 96f);
+        var maxRadius = Mathf.Max(40f, Mathf.Min(sw, sh) * 0.42f - arrowSize * 0.5f);
+        var radius = Mathf.Clamp(fpvDirectionArrowRadius, 40f, maxRadius);
         var arrowCenter = center + dir * radius;
+        var arrowRect = new Rect(
+            arrowCenter.x - arrowSize * 0.5f,
+            arrowCenter.y - arrowSize * 0.5f,
+            arrowSize,
+            arrowSize);
 
         var pulse = Mathf.Sin(Time.time * 3f) * 0.3f + 0.7f;
         var oldColor = GUI.color;
-        GUI.color = new Color(1f, 1f, 1f, pulse);
-
         var savedMatrix = GUI.matrix;
-        GUIUtility.RotateAroundPivot(angle, arrowCenter);
 
-        var style = new GUIStyle(GUI.skin.label)
-        {
-            fontSize  = 30,
-            fontStyle = FontStyle.Bold,
-            alignment = TextAnchor.MiddleCenter,
-        };
-        style.normal.textColor = new Color(1f, 0.88f, 0.1f);
-        GUI.Label(new Rect(arrowCenter.x - arrowSize * 0.5f, arrowCenter.y - arrowSize * 0.5f,
-            arrowSize, arrowSize), "▲", style);
+        GUIUtility.RotateAroundPivot(angle, arrowCenter);
+        var texture = GetFpvDirectionArrowTexture();
+
+        GUI.color = new Color(0f, 0f, 0f, pulse * 0.45f);
+        GUI.DrawTexture(new Rect(arrowRect.x + 2f, arrowRect.y + 2f, arrowRect.width, arrowRect.height),
+            texture, ScaleMode.StretchToFill, true);
+
+        GUI.color = new Color(indicatorColor.r, indicatorColor.g, indicatorColor.b, indicatorColor.a * pulse);
+        GUI.DrawTexture(arrowRect, texture, ScaleMode.StretchToFill, true);
 
         GUI.matrix = savedMatrix;
         GUI.color = oldColor;
+
+        DrawFpvDirectionLabel(arrowRect, dir, signedAngle, indicatorColor, pulse);
+    }
+
+    private static Vector2 GetFpvHorizontalGuiDirection(Vector3 targetWorldPos, Camera cam, out float signedAngle)
+    {
+        signedAngle = 0f;
+        var toTarget = targetWorldPos - cam.transform.position;
+        toTarget.y = 0f;
+        if (toTarget.sqrMagnitude < 0.001f)
+            return Vector2.zero;
+
+        var forward = cam.transform.forward;
+        forward.y = 0f;
+        if (forward.sqrMagnitude < 0.001f)
+            forward = Vector3.forward;
+        forward.Normalize();
+
+        var right = cam.transform.right;
+        right.y = 0f;
+        if (right.sqrMagnitude < 0.001f)
+            right = Vector3.Cross(Vector3.up, forward);
+        right.Normalize();
+
+        var flatTarget = toTarget.normalized;
+        var x = Vector3.Dot(flatTarget, right);
+        var z = Vector3.Dot(flatTarget, forward);
+        signedAngle = Mathf.Atan2(x, z) * Mathf.Rad2Deg;
+        var dir = new Vector2(x, -z);
+        return dir.sqrMagnitude > 0.001f ? dir.normalized : Vector2.zero;
+    }
+
+    private void DrawFpvDirectionLabel(Rect arrowRect, Vector2 dir, float signedAngle, Color color, float pulse)
+    {
+        const float labelW = 118f;
+        const float labelH = 24f;
+        var labelX = Mathf.Clamp(arrowRect.center.x - labelW * 0.5f, 8f, Screen.width - labelW - 8f);
+        var labelY = dir.y > 0.25f ? arrowRect.y - labelH - 6f : arrowRect.yMax + 6f;
+        labelY = Mathf.Clamp(labelY, 8f, Screen.height - labelH - 8f);
+        var labelRect = new Rect(labelX, labelY, labelW, labelH);
+
+        var oldColor = GUI.color;
+        GUI.color = new Color(0f, 0f, 0f, 0.55f * pulse);
+        GUI.Box(new Rect(labelRect.x + 2f, labelRect.y + 2f, labelRect.width, labelRect.height), GUIContent.none);
+
+        GUI.color = new Color(1f, 1f, 1f, pulse);
+        var style = new GUIStyle(GUI.skin.box)
+        {
+            fontSize = 13,
+            fontStyle = FontStyle.Bold,
+            alignment = TextAnchor.MiddleCenter
+        };
+        style.normal.textColor = color;
+        GUI.Box(labelRect, GetFpvDirectionLabelText(signedAngle), style);
+        GUI.color = oldColor;
+    }
+
+    private static string GetFpvDirectionLabelText(float signedAngle)
+    {
+        var absAngle = Mathf.Abs(signedAngle);
+        if (absAngle <= 28f)
+            return "VOR DIR";
+        if (absAngle >= 145f)
+            return "UMDREHEN";
+        return signedAngle > 0f ? "RECHTS" : "LINKS";
+    }
+
+    private static Color GetFpvDirectionArrowColor(float signedAngle, Color normalColor)
+    {
+        var absAngle = Mathf.Abs(signedAngle);
+        if (absAngle <= 28f)
+            return new Color(0.35f, 1f, 0.45f);
+        if (absAngle >= 145f)
+            return new Color(1f, 0.42f, 0.05f);
+        return normalColor;
+    }
+
+    private Texture2D GetFpvDirectionArrowTexture()
+    {
+        if (fpvDirectionArrowTexture != null)
+            return fpvDirectionArrowTexture;
+
+        const int size = 64;
+        var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+        {
+            hideFlags = HideFlags.HideAndDontSave,
+            filterMode = FilterMode.Bilinear,
+            wrapMode = TextureWrapMode.Clamp,
+        };
+
+        var pixels = new Color32[size * size];
+        var transparent = new Color32(0, 0, 0, 0);
+        var outline = new Color32(36, 30, 8, 255);
+        var fill = new Color32(255, 255, 255, 255);
+
+        for (var y = 0; y < size; y++)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                var px = x + 0.5f;
+                var py = y + 0.5f;
+                var pixelIndex = y * size + x;
+
+                if (IsFpvArrowInnerPixel(px, py))
+                    pixels[pixelIndex] = fill;
+                else if (IsFpvArrowOuterPixel(px, py))
+                    pixels[pixelIndex] = outline;
+                else
+                    pixels[pixelIndex] = transparent;
+            }
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply(false, true);
+        fpvDirectionArrowTexture = texture;
+        return fpvDirectionArrowTexture;
+    }
+
+    private static bool IsFpvArrowOuterPixel(float x, float y)
+    {
+        return IsPointInTriangle(x, y, 32f, 62f, 7f, 32f, 57f, 32f)
+               || (x >= 22f && x <= 42f && y >= 2f && y <= 37f);
+    }
+
+    private static bool IsFpvArrowInnerPixel(float x, float y)
+    {
+        return IsPointInTriangle(x, y, 32f, 56f, 16f, 35f, 48f, 35f)
+               || (x >= 27f && x <= 37f && y >= 8f && y <= 36f);
+    }
+
+    private static bool IsPointInTriangle(float px, float py,
+        float ax, float ay, float bx, float by, float cx, float cy)
+    {
+        var d1 = TriangleSign(px, py, ax, ay, bx, by);
+        var d2 = TriangleSign(px, py, bx, by, cx, cy);
+        var d3 = TriangleSign(px, py, cx, cy, ax, ay);
+
+        var hasNegative = d1 < 0f || d2 < 0f || d3 < 0f;
+        var hasPositive = d1 > 0f || d2 > 0f || d3 > 0f;
+        return !(hasNegative && hasPositive);
+    }
+
+    private static float TriangleSign(float px, float py, float ax, float ay, float bx, float by)
+    {
+        return (px - bx) * (ay - by) - (ax - bx) * (py - by);
     }
 
     private void DrawFpvHud()
@@ -1776,8 +2404,10 @@ public class QuickAgentManager : MonoBehaviour
             else if (isPendingArrival)
                 plateText = $"★  {agentName}  —  wartet auf dich";
             else
-                plateText = $"{agentName}   [{fpvChatKey} = Chat öffnen]";
-            GUI.Box(new Rect(sw * 0.5f - 200f, sh * 0.5f + 40f, 400f, 28f), plateText, plateStyle);
+                plateText = $"{agentName}   [{fpvChatKey} = Chat]  [{voiceRecordKey} halten = Sprechen]";
+            var plateWidth = Mathf.Min(620f, sw - 20f);
+            var plateY = _fpvChatOpen ? sh - 204f : sh - 68f;
+            GUI.Box(new Rect(sw * 0.5f - plateWidth * 0.5f, plateY, plateWidth, 28f), plateText, plateStyle);
         }
 
         // Chat overlay
@@ -1879,7 +2509,8 @@ public class QuickAgentManager : MonoBehaviour
                 alignment = TextAnchor.MiddleCenter,
             };
             pendingStyle.normal.textColor = new Color(1f, 0.9f, 0.1f);
-            GUI.Box(new Rect(sw * 0.5f - 300f, 40f, 600f, 36f),
+            var pendingY = (isVoiceRecording || sttInFlight) ? sh - 144f : sh - 104f;
+            GUI.Box(new Rect(sw * 0.5f - 300f, pendingY, 600f, 36f),
                 $"★   {pendingName} wartet auf dich  —  lauf hin!   ★", pendingStyle);
 
             GUI.color = oldColor;
@@ -1890,8 +2521,17 @@ public class QuickAgentManager : MonoBehaviour
         {
             var hudStyle = new GUIStyle(GUI.skin.box) { fontSize = 13, alignment = TextAnchor.MiddleCenter };
             hudStyle.normal.textColor = Color.white;
-            var hint = $"FPV-Modus  |  WASD = bewegen  QE = hoch/runter  Shift = schneller  |  {fpvToggleKey} = beenden";
-            GUI.Box(new Rect(sw * 0.5f - 320f, 8f, 640f, 26f), hint, hudStyle);
+            var hint = $"FPV-Modus  |  WASD = bewegen  QE = hoch/runter  Shift = schneller  |  {voiceRecordKey} halten = sprechen  |  {fpvToggleKey} = beenden";
+            var hintWidth = Mathf.Min(780f, sw - 20f);
+            GUI.Box(new Rect(sw * 0.5f - hintWidth * 0.5f, sh - 34f, hintWidth, 26f), hint, hudStyle);
+        }
+
+        if (isVoiceRecording || sttInFlight)
+        {
+            var voiceStyle = new GUIStyle(GUI.skin.box) { fontSize = 14, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+            voiceStyle.normal.textColor = isVoiceRecording ? new Color(1f, 0.9f, 0.2f) : new Color(0.55f, 0.85f, 1f);
+            var voiceText = isVoiceRecording ? "Aufnahme laeuft... Taste loslassen zum Senden" : "Transkription laeuft...";
+            GUI.Box(new Rect(sw * 0.5f - 210f, sh - 104f, 420f, 30f), voiceText, voiceStyle);
         }
     }
 

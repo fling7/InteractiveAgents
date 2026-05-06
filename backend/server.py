@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from email import policy
+from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
@@ -29,6 +31,44 @@ def _read_json(handler: BaseHTTPRequestHandler) -> Dict[str, Any]:
     if not raw.strip():
         return {}
     return json.loads(raw)
+
+
+def _read_multipart(handler: BaseHTTPRequestHandler) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    content_type = handler.headers.get("Content-Type", "")
+    if "multipart/form-data" not in content_type.lower():
+        raise ValueError("Content-Type muss multipart/form-data sein.")
+
+    length = int(handler.headers.get("Content-Length", "0"))
+    if length <= 0:
+        raise ValueError("Multipart-Body fehlt.")
+
+    raw = handler.rfile.read(length)
+    msg = BytesParser(policy=policy.default).parsebytes(
+        b"Content-Type: " + content_type.encode("utf-8") + b"\r\nMIME-Version: 1.0\r\n\r\n" + raw
+    )
+    if not msg.is_multipart():
+        raise ValueError("Multipart-Body konnte nicht gelesen werden.")
+
+    fields: Dict[str, Any] = {}
+    files: Dict[str, Dict[str, Any]] = {}
+    for part in msg.iter_parts():
+        disposition = part.get("Content-Disposition", "")
+        if "form-data" not in disposition:
+            continue
+        name = part.get_param("name", header="content-disposition")
+        if not name:
+            continue
+        data = part.get_payload(decode=True) or b""
+        filename = part.get_filename()
+        if filename is None:
+            fields[name] = data.decode(part.get_content_charset("utf-8"), errors="replace")
+        else:
+            files[name] = {
+                "filename": filename,
+                "content_type": part.get_content_type(),
+                "content": data,
+            }
+    return fields, files
 
 
 def _binary_response(handler: BaseHTTPRequestHandler, status: int, payload: bytes, content_type: str) -> None:
@@ -96,6 +136,7 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
                                 "GET /projects/{id}/knowledge": "Wissensliste",
                                 "POST /projects/{id}/knowledge": "Wissen erstellen/aktualisieren/löschen",
                                 "POST /projects/{id}/knowledge/read": "Wissen laden",
+                                "POST /stt": "Speech-to-Text transkribieren",
                                 "POST /tts": "Text-to-Speech erzeugen",
                             },
                             "examples": {
@@ -132,6 +173,23 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
         def do_POST(self) -> None:  # noqa: N802
             self._log_request()
             path = urlparse(self.path).path
+            if path == "/stt":
+                try:
+                    fields, files = _read_multipart(self)
+                    audio_info = files.get("audio") or files.get("file") or {}
+                    self._log_action(
+                        "STT anfordern: "
+                        f"filename={audio_info.get('filename')}, bytes={len(audio_info.get('content') or b'')}"
+                    )
+                    out = store.stt(fields, files)
+                    return self._send_json(200, out)
+                except ValueError as exc:
+                    self._log_action(f"Fehler POST {path}: {exc}")
+                    return self._send_json(400, {"error": str(exc)})
+                except Exception as exc:
+                    self._log_action(f"Fehler POST {path}: {exc}")
+                    return self._send_json(500, {"error": "Server error", "details": str(exc)})
+
             try:
                 payload = _read_json(self)
             except json.JSONDecodeError as e:

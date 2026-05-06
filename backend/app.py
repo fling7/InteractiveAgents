@@ -29,6 +29,9 @@ class AppConfig:
     kb_max_snippets: int
     temperature: float
     timeout_seconds: int
+    stt_model: str
+    stt_language: str
+    stt_max_audio_bytes: int
 
 
 def _project_root() -> Path:
@@ -130,6 +133,9 @@ def load_config() -> AppConfig:
         kb_max_snippets=int(_get("kb_max_snippets", 4)),
         temperature=float(_get("temperature", 0.3)),
         timeout_seconds=int(_get("timeout_seconds", 60)),
+        stt_model=str(_get("stt_model", "whisper-1")).strip(),
+        stt_language=str(_get("stt_language", "de")).strip(),
+        stt_max_audio_bytes=int(_get("stt_max_audio_bytes", 25 * 1024 * 1024)),
     )
 
     # If key missing: ask once and write back to config.json
@@ -183,6 +189,9 @@ def run() -> None:
         kb_max_snippets=cfg.kb_max_snippets,
         model=cfg.model,
         temperature=cfg.temperature,
+        stt_model=cfg.stt_model,
+        stt_language=cfg.stt_language,
+        stt_max_audio_bytes=cfg.stt_max_audio_bytes,
         openai=OpenAIResponsesClient(
             api_key=cfg.openai_api_key,
             base_url=cfg.openai_base_url,

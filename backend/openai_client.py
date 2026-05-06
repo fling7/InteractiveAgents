@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -160,6 +161,85 @@ def create_tts_audio(
             audio = resp.read()
             content_type = resp.headers.get("Content-Type", "audio/mpeg")
             return audio, content_type
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            details = json.loads(raw)
+        except Exception:
+            details = {"raw": raw}
+        raise OpenAIHTTPError(e.code, f"OpenAI HTTP {e.code}", details=details) from e
+    except urllib.error.URLError as e:
+        raise OpenAIHTTPError(0, f"OpenAI connection error: {e}") from e
+
+
+def _build_multipart_form_data(
+    fields: Dict[str, str],
+    files: Dict[str, Tuple[str, str, bytes]],
+) -> Tuple[bytes, str]:
+    boundary = f"----OpenAIUnityBoundary{uuid.uuid4().hex}"
+    chunks: List[bytes] = []
+
+    for name, value in fields.items():
+        if value is None or str(value) == "":
+            continue
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        chunks.append(str(value).encode("utf-8"))
+        chunks.append(b"\r\n")
+
+    for name, (filename, content_type, data) in files.items():
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(
+            (
+                f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+                f"Content-Type: {content_type or 'application/octet-stream'}\r\n\r\n"
+            ).encode("utf-8")
+        )
+        chunks.append(data)
+        chunks.append(b"\r\n")
+
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(chunks), boundary
+
+
+def create_transcription(
+    *,
+    api_key: str,
+    audio: bytes,
+    filename: str,
+    content_type: str,
+    model: str,
+    language: Optional[str] = None,
+    prompt: Optional[str] = None,
+    timeout_seconds: int = 60,
+) -> Dict[str, Any]:
+    fields = {
+        "model": model,
+        "response_format": "json",
+    }
+    if language:
+        fields["language"] = language
+    if prompt:
+        fields["prompt"] = prompt
+
+    body, boundary = _build_multipart_form_data(
+        fields=fields,
+        files={"file": (filename or "speech.wav", content_type or "audio/wav", audio)},
+    )
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/audio/transcriptions",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw)
     except urllib.error.HTTPError as e:
         raw = e.read().decode("utf-8", errors="replace")
         try:

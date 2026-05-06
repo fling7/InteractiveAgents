@@ -19,3 +19,22 @@ Content-Type: application/json
   "active_agent_id": "agent_tech",
   "user_text": "Was kostet euer Produkt und gibt es Mengenrabatt?"
 }
+
+### Speech-to-Text (sample.wav im examples-Ordner ablegen)
+POST http://127.0.0.1:8787/stt
+Content-Type: multipart/form-data; boundary=VoiceBoundary
+
+--VoiceBoundary
+Content-Disposition: form-data; name="model"
+
+whisper-1
+--VoiceBoundary
+Content-Disposition: form-data; name="language"
+
+de
+--VoiceBoundary
+Content-Disposition: form-data; name="audio"; filename="sample.wav"
+Content-Type: audio/wav
+
+< ./sample.wav
+--VoiceBoundary--

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .kb import KnowledgeBase
-from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_tts_audio
+from .openai_client import OpenAIHTTPError, OpenAIResponsesClient, create_transcription, create_tts_audio
 from .placement import assign_spawn_points, normalize_placement_preview, summarize_room_objects, mlds_slice_obstacles, _is_mlds
 from .projects import ProjectManager
 from .schemas import arrow_project_schema, npc_action_schema
@@ -122,6 +122,9 @@ class SessionStore:
     kb_max_snippets: int
     model: str
     temperature: float
+    stt_model: str
+    stt_language: str
+    stt_max_audio_bytes: int
     openai: OpenAIResponsesClient
     project_manager: ProjectManager
     default_room_plan_path: str = "examples/room_plan.example.json"
@@ -277,6 +280,47 @@ class SessionStore:
             flush=True,
         )
         return audio, content_type
+
+    def stt(self, payload: Dict[str, Any], files: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        file_info = files.get("audio") or files.get("file")
+        if not file_info:
+            raise ValueError("audio fehlt.")
+
+        audio = file_info.get("content") or b""
+        if not isinstance(audio, (bytes, bytearray)) or not audio:
+            raise ValueError("audio ist leer.")
+        if len(audio) > self.stt_max_audio_bytes:
+            raise ValueError(f"audio ist zu groß ({len(audio)} Bytes, Limit {self.stt_max_audio_bytes}).")
+
+        model = str(payload.get("model") or self.stt_model or "whisper-1").strip()
+        language = str(payload.get("language") or self.stt_language or "").strip() or None
+        prompt = str(payload.get("prompt") or "").strip() or None
+        filename = str(file_info.get("filename") or "speech.wav").strip() or "speech.wav"
+        content_type = str(file_info.get("content_type") or "audio/wav").strip() or "audio/wav"
+
+        print(
+            "[STT] Anfrage vorbereiten: "
+            f"bytes={len(audio)}, filename={filename}, content_type={content_type}, model={model}, language={language or ''}",
+            flush=True,
+        )
+        result = create_transcription(
+            api_key=self.openai.api_key,
+            audio=bytes(audio),
+            filename=filename,
+            content_type=content_type,
+            model=model,
+            language=language,
+            prompt=prompt,
+            timeout_seconds=self.openai.timeout_seconds,
+        )
+
+        text = str(result.get("text") or "").strip()
+        print(f"[STT] Transkript erhalten: text_len={len(text)}", flush=True)
+        return {
+            "text": text,
+            "model": model,
+            "language": language,
+        }
 
     def _get_project_kb(self, project_id: str) -> KnowledgeBase:
         if project_id in self.kb_cache:
