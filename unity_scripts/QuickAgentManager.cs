@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
@@ -13,6 +14,24 @@ using UnityEngine.Networking;
 
 public class QuickAgentManager : MonoBehaviour
 {
+#if UNITY_WEBGL && !UNITY_EDITOR
+    [DllImport("__Internal")]
+    private static extern int IAVoice_IsSupported();
+
+    [DllImport("__Internal")]
+    private static extern void IAVoice_StartRecording(
+        string gameObjectName,
+        string successMethodName,
+        string errorMethodName,
+        string backendBaseUrl,
+        string sttModel,
+        string sttLanguage,
+        float maxSeconds);
+
+    [DllImport("__Internal")]
+    private static extern void IAVoice_StopRecording();
+#endif
+
     [Header("Backend")]
     public string backendBaseUrl = "http://127.0.0.1:8787";
     public string roomPlanPath = "examples/room_plan.example.json";
@@ -60,6 +79,13 @@ public class QuickAgentManager : MonoBehaviour
     public float cameraBoostMultiplier = 2f;
     public float cameraLookSpeed = 2f;
     public float cameraLookClamp = 80f;
+
+    [Header("XR/WebXR")]
+    public bool moveXrOriginInsteadOfCamera = true;
+    public bool ensureFallbackGroundCollider = true;
+    public Vector2 fallbackGroundSize = new Vector2(40f, 40f);
+    public float fallbackGroundY = 0f;
+    public float fallbackGroundThickness = 0.08f;
 
     [Header("FPV-Modus")]
     public KeyCode fpvToggleKey = KeyCode.F1;
@@ -238,6 +264,7 @@ public class QuickAgentManager : MonoBehaviour
     private float cameraPitch;
     private bool cameraInitialized;
     private bool _fpvActive;
+    private Transform _fpvSavedTransform;
     private Vector3 _fpvSavedPos;
     private Quaternion _fpvSavedRot;
     private bool _fpvChatOpen;
@@ -248,6 +275,9 @@ public class QuickAgentManager : MonoBehaviour
     private ChatEvent[] _pendingHandoffEvents;
     private const string FpvChatControlName = "fpvChatField";
     private const float InputSystemMouseDeltaScale = 0.05f;
+    private const string BrowserVoiceTranscriptMethod = "OnBrowserVoiceTranscript";
+    private const string BrowserVoiceErrorMethod = "OnBrowserVoiceError";
+    private const string FallbackGroundName = "InteractiveAgents_FallbackGround";
 
     private void Start()
     {
@@ -288,14 +318,19 @@ public class QuickAgentManager : MonoBehaviour
     {
         var cam = Camera.main;
         if (cam == null) return;
+        var viewerTransform = GetViewerMovementTransform(cam);
 
         if (!_fpvActive)
         {
-            _fpvSavedPos = cam.transform.position;
-            _fpvSavedRot = cam.transform.rotation;
+            _fpvSavedTransform = viewerTransform;
+            _fpvSavedPos = viewerTransform.position;
+            _fpvSavedRot = viewerTransform.rotation;
 
-            cam.transform.position = ComputeRoomCenter();
-            cam.transform.rotation = Quaternion.identity;
+            MoveViewerToCameraWorldPosition(cam, viewerTransform, ComputeRoomCenter());
+            if (viewerTransform == cam.transform)
+            {
+                cam.transform.rotation = Quaternion.identity;
+            }
             cameraYaw   = 0f;
             cameraPitch = 0f;
             cameraInitialized = true;
@@ -306,8 +341,10 @@ public class QuickAgentManager : MonoBehaviour
         }
         else
         {
-            cam.transform.position = _fpvSavedPos;
-            cam.transform.rotation = _fpvSavedRot;
+            var restoreTransform = _fpvSavedTransform != null ? _fpvSavedTransform : viewerTransform;
+            restoreTransform.position = _fpvSavedPos;
+            restoreTransform.rotation = _fpvSavedRot;
+            _fpvSavedTransform = null;
 
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible   = true;
@@ -352,6 +389,36 @@ public class QuickAgentManager : MonoBehaviour
             light.type = LightType.Directional;
             light.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
         }
+
+        EnsureFallbackGroundCollider();
+    }
+
+    private void EnsureFallbackGroundCollider()
+    {
+        if (!ensureFallbackGroundCollider)
+        {
+            return;
+        }
+
+        var groundObject = GameObject.Find(FallbackGroundName);
+        if (groundObject == null)
+        {
+            groundObject = new GameObject(FallbackGroundName);
+            groundObject.hideFlags = HideFlags.DontSave;
+        }
+
+        var collider = groundObject.GetComponent<BoxCollider>();
+        if (collider == null)
+        {
+            collider = groundObject.AddComponent<BoxCollider>();
+        }
+
+        var sizeX = Mathf.Max(4f, fallbackGroundSize.x);
+        var sizeZ = Mathf.Max(4f, fallbackGroundSize.y);
+        var thickness = Mathf.Max(0.01f, fallbackGroundThickness);
+        groundObject.transform.position = Vector3.zero;
+        collider.center = new Vector3(0f, fallbackGroundY - thickness * 0.5f, 0f);
+        collider.size = new Vector3(sizeX, thickness, sizeZ);
     }
 
     private IEnumerator SetupFromServer()
@@ -1695,6 +1762,11 @@ public class QuickAgentManager : MonoBehaviour
             return;
         }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        StartBrowserVoiceRecording();
+        return;
+#endif
+
         if (Microphone.devices == null || Microphone.devices.Length == 0)
         {
             statusMessage = "Kein Mikrofon gefunden.";
@@ -1723,12 +1795,51 @@ public class QuickAgentManager : MonoBehaviour
         statusMessage = $"Aufnahme laeuft... {voiceRecordKey} loslassen zum Senden.";
     }
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+    private void StartBrowserVoiceRecording()
+    {
+        if (IAVoice_IsSupported() == 0)
+        {
+            statusMessage = "Browser-Mikrofon wird nicht unterstuetzt.";
+            chatLog.Add(statusMessage);
+            return;
+        }
+
+        if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(activeAgentId))
+        {
+            statusMessage = "Kein aktiver Agent fuer Voice Chat.";
+            return;
+        }
+
+        isVoiceRecording = true;
+        sttInFlight = false;
+        voiceRecordingStartedAt = Time.time;
+        statusMessage = $"Browser-Aufnahme laeuft... {voiceRecordKey} loslassen zum Senden.";
+        IAVoice_StartRecording(
+            gameObject.name,
+            BrowserVoiceTranscriptMethod,
+            BrowserVoiceErrorMethod,
+            backendBaseUrl,
+            sttModel,
+            sttLanguage,
+            Mathf.Max(1f, voiceMaxRecordSeconds));
+    }
+#endif
+
     private void StopVoiceRecordingAndSend()
     {
         if (!isVoiceRecording)
         {
             return;
         }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        isVoiceRecording = false;
+        sttInFlight = true;
+        statusMessage = "Transkription laeuft...";
+        IAVoice_StopRecording();
+        return;
+#endif
 
         var clip = voiceRecordingClip;
         var device = voiceRecordingDevice;
@@ -1813,17 +1924,48 @@ public class QuickAgentManager : MonoBehaviour
                 yield break;
             }
 
-            statusMessage = "Transkription OK.";
-            if (sendVoiceTranscriptAutomatically)
-            {
-                chatLog.Add($"[Du/Voice] {transcript}");
-                StartCoroutine(SendChat(transcript));
-            }
-            else
-            {
-                chatInput = transcript;
-                statusMessage = "Transkript ins Chatfeld uebernommen.";
-            }
+            HandleVoiceTranscript(transcript);
+        }
+    }
+
+    public void OnBrowserVoiceTranscript(string json)
+    {
+        isVoiceRecording = false;
+        sttInFlight = false;
+
+        var resp = string.IsNullOrWhiteSpace(json) ? null : JsonUtility.FromJson<SttResponse>(json);
+        var transcript = resp == null ? "" : (resp.text ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(transcript))
+        {
+            statusMessage = "Keine Sprache erkannt.";
+            chatLog.Add(statusMessage);
+            return;
+        }
+
+        HandleVoiceTranscript(transcript);
+    }
+
+    public void OnBrowserVoiceError(string message)
+    {
+        isVoiceRecording = false;
+        sttInFlight = false;
+        var detail = string.IsNullOrWhiteSpace(message) ? "Unbekannter Browser-Mikrofonfehler." : message;
+        statusMessage = "Voice fehlgeschlagen: " + detail;
+        chatLog.Add(statusMessage);
+    }
+
+    private void HandleVoiceTranscript(string transcript)
+    {
+        statusMessage = "Transkription OK.";
+        if (sendVoiceTranscriptAutomatically)
+        {
+            chatLog.Add($"[Du/Voice] {transcript}");
+            StartCoroutine(SendChat(transcript));
+        }
+        else
+        {
+            chatInput = transcript;
+            statusMessage = "Transkript ins Chatfeld uebernommen.";
         }
     }
 
@@ -1962,6 +2104,78 @@ public class QuickAgentManager : MonoBehaviour
         StartCoroutine(SendChat(toSend));
     }
 
+    private Transform GetViewerMovementTransform(Camera cam)
+    {
+        if (cam == null || !moveXrOriginInsteadOfCamera)
+        {
+            return cam != null ? cam.transform : null;
+        }
+
+        var current = cam.transform;
+        while (current != null)
+        {
+            if (IsXrOriginLikeTransform(current))
+            {
+                return current;
+            }
+
+            current = current.parent;
+        }
+
+        return cam.transform;
+    }
+
+    private static bool IsXrOriginLikeTransform(Transform candidate)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+
+        var name = candidate.name;
+        if (!string.IsNullOrEmpty(name)
+            && (name.IndexOf("XR Origin", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("XROrigin", StringComparison.OrdinalIgnoreCase) >= 0
+                || name.IndexOf("XR Rig", StringComparison.OrdinalIgnoreCase) >= 0))
+        {
+            return true;
+        }
+
+        var components = candidate.GetComponents<Component>();
+        foreach (var component in components)
+        {
+            if (component == null)
+            {
+                continue;
+            }
+
+            var typeName = component.GetType().Name;
+            if (typeName == "XROrigin" || typeName == "XRRig")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void MoveViewerToCameraWorldPosition(Camera cam, Transform viewerTransform, Vector3 targetCameraWorldPosition)
+    {
+        if (cam == null || viewerTransform == null)
+        {
+            return;
+        }
+
+        if (viewerTransform == cam.transform)
+        {
+            viewerTransform.position = targetCameraWorldPosition;
+            return;
+        }
+
+        var delta = targetCameraWorldPosition - cam.transform.position;
+        viewerTransform.position += delta;
+    }
+
     private void UpdateFreeMovement()
     {
         if (!enableFreeMovement)
@@ -1981,6 +2195,11 @@ public class QuickAgentManager : MonoBehaviour
 
         var cam = Camera.main;
         if (cam == null)
+        {
+            return;
+        }
+        var viewerTransform = GetViewerMovementTransform(cam);
+        if (viewerTransform == null)
         {
             return;
         }
@@ -2042,14 +2261,43 @@ public class QuickAgentManager : MonoBehaviour
 #endif
             cameraYaw += lookDelta.x * lookSpeed;
             cameraPitch = Mathf.Clamp(cameraPitch - lookDelta.y * lookSpeed, -cameraLookClamp, cameraLookClamp);
-            cam.transform.rotation = Quaternion.Euler(cameraPitch, cameraYaw, 0f);
+            if (viewerTransform == cam.transform)
+            {
+                cam.transform.rotation = Quaternion.Euler(cameraPitch, cameraYaw, 0f);
+            }
+            else
+            {
+                viewerTransform.rotation = Quaternion.Euler(0f, cameraYaw, 0f);
+            }
         }
 
         if (move.sqrMagnitude > 0.001f)
         {
             var speed = cameraMoveSpeed * (isBoost ? cameraBoostMultiplier : 1f);
             Vector3 direction;
-            if (_fpvActive)
+            if (viewerTransform != cam.transform)
+            {
+                var forward = cam.transform.forward;
+                forward.y = 0f;
+                if (forward.sqrMagnitude < 0.001f)
+                {
+                    forward = viewerTransform.forward;
+                    forward.y = 0f;
+                }
+                forward = forward.sqrMagnitude > 0.001f ? forward.normalized : Vector3.forward;
+
+                var right = cam.transform.right;
+                right.y = 0f;
+                if (right.sqrMagnitude < 0.001f)
+                {
+                    right = viewerTransform.right;
+                    right.y = 0f;
+                }
+                right = right.sqrMagnitude > 0.001f ? right.normalized : Vector3.right;
+
+                direction = (right * move.x + Vector3.up * move.y + forward * move.z).normalized;
+            }
+            else if (_fpvActive)
             {
                 // Horizontal movement (WASD) uses yaw only so height stays locked
                 var horizontal = Quaternion.Euler(0f, cameraYaw, 0f) * new Vector3(move.x, 0f, move.z);
@@ -2060,7 +2308,7 @@ public class QuickAgentManager : MonoBehaviour
             {
                 direction = cam.transform.TransformDirection(move.normalized);
             }
-            cam.transform.position += direction * speed * Time.deltaTime;
+            viewerTransform.position += direction * speed * Time.deltaTime;
         }
     }
 

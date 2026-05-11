@@ -10,15 +10,22 @@ from urllib.parse import urlparse
 from .state import SessionStore
 
 
+def _set_cors_headers(handler: BaseHTTPRequestHandler) -> None:
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.send_header(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Accept, X-Requested-With, X-Unity-Version",
+    )
+    handler.send_header("Access-Control-Allow-Private-Network", "true")
+
+
 def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: Dict[str, Any]) -> None:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(data)))
-    # CORS (useful for WebGL or external tools)
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    _set_cors_headers(handler)
     handler.end_headers()
     handler.wfile.write(data)
 
@@ -75,9 +82,7 @@ def _binary_response(handler: BaseHTTPRequestHandler, status: int, payload: byte
     handler.send_response(status)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(payload)))
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    _set_cors_headers(handler)
     handler.end_headers()
     handler.wfile.write(payload)
 
@@ -105,9 +110,7 @@ def start_http_server(host: str, port: int, store: SessionStore) -> None:
         def do_OPTIONS(self) -> None:  # noqa: N802
             self._log_request()
             self.send_response(204)
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            _set_cors_headers(self)
             self.end_headers()
             print(f"[HTTP] <- {self.command} {self.path} 204", flush=True)
 

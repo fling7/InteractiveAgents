@@ -133,6 +133,7 @@ Unter `unity_scripts/` liegen **Beispiel‑C#‑Skripte** (kein komplettes Unity
 - `BackendClient.cs`: REST‑Calls zu `/setup` und `/chat`
 - `AgentSpawnPoint.cs`: markiert Spawnpoints im Raum (optional)
 - `QuickAgentManager.cs`: **alles‑in‑einem** Script für ein leeres Unity‑Projekt (GUI, Setup, Spawning, Chat, Voice Input, TTS)
+- `Plugins/WebGL/WebGLVoiceBridge.jslib`: Browser-Mikrofonbridge für WebGL/WebXR Builds
 - `AgentManagerExample.cs`: Beispiel‑Controller, der `BackendClient` nutzt und Agenten spawnt
 - `ProjectManagerUI.cs`: Editor‑Fenster für Projekte/Agenten/Wissen (Unity‑Menüpunkt)
 - `RoomPlanExporter.cs`: exportiert Spawnpoints aus der Szene als `room_plan.json`
@@ -143,8 +144,9 @@ Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
 1. **Backend starten** (siehe Abschnitt „Start in PyCharm“). Server läuft auf `http://127.0.0.1:8787`.
 2. Neues Unity‑Projekt erstellen (3D).
 3. In Unity unter `Assets/` ein neues C#‑Script anlegen und **Inhalt von** `unity_scripts/QuickAgentManager.cs` **einfügen**.
-4. Script auf ein leeres GameObject ziehen (z.B. `AgentManager`).
-5. **Play** drücken.
+4. Für WebGL/WebXR zusätzlich `unity_scripts/Plugins` nach `Assets/Plugins` kopieren.
+5. Script auf ein leeres GameObject ziehen (z.B. `AgentManager`).
+6. **Play** drücken.
 
 **Was passiert dann?**
 - Das Script ruft automatisch `POST /setup` auf, um die Agentenanzahl zu ermitteln.
@@ -200,6 +202,11 @@ Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
 - **Camera Look Speed**: Maus-Geschwindigkeit für Blickbewegung.
 - **Camera Look Clamp**: Max. Pitch-Winkel (nach oben/unten).
 
+**XR/WebXR**
+- **Move Xr Origin Instead Of Camera**: Bewegt bei erkanntem XR Origin den Rig-Root statt der HMD-Kamera.
+- **Ensure Fallback Ground Collider**: Erstellt einen unsichtbaren Boden-Collider, damit XR-Locomotion/CharacterController nicht durch den Boden fällt.
+- **Fallback Ground Size/Y/Thickness**: Größe und Höhe dieses unsichtbaren Colliders. Bei abweichender Bodenhöhe `Fallback Ground Y` entsprechend setzen.
+
 **Runtime (nur Play-Mode)**
 - **Session Id**: Aktuelle Session vom Backend; wird nach Setup gesetzt.
 - **Active Agent Id**: Der ausgewählte Agent, an den Chats gesendet werden.
@@ -211,6 +218,15 @@ Du kannst diese Dateien 1:1 in dein Unity‑Projekt kopieren und anpassen.
 - **Agenten wählen**: Setzt den aktiven Agenten (auch per Linksklick auf Box).
 - **Chat senden**: Sendet `POST /chat` an den aktiven Agenten.
 - **Voice senden**: `V` halten oder Button **Voice aufnehmen** nutzen; das Transkript wird automatisch gesendet.
+
+### Lokaler WebGL/WebXR-Test
+Für einen lokalen Browser-Test bleibt die Agentenlogik unverändert:
+1. Backend in PyCharm starten (`main.py`), Standard: `http://127.0.0.1:8787`.
+2. Unity WebGL/WebXR Build über **Build And Run** starten, damit die Seite über `http://localhost/...` läuft.
+3. `Backend Base Url` im Inspector auf `http://127.0.0.1:8787` lassen.
+4. Im Browser beim ersten Voice-Input die Mikrofonberechtigung erlauben.
+
+Im Editor und in Desktop-Builds nutzt `QuickAgentManager.cs` weiter Unitys `Microphone` API. Im WebGL-Build übernimmt automatisch `WebGLVoiceBridge.jslib` die Aufnahme mit Browser-APIs und sendet die Aufnahme direkt an `/stt`.
 
 ### Nutzung der zusätzlichen Skripte
 Die folgenden Schritte zeigen, wie du die **neuen Skripte** in ein bestehendes Unity‑Projekt einbaust:
