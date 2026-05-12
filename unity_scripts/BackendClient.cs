@@ -9,6 +9,7 @@ public class BackendClient : MonoBehaviour
 {
     [Header("Backend")]
     public string backendBaseUrl = "http://127.0.0.1:8787";
+    public string memoryMode = "shared_history";
 
     [Serializable]
     public class Vector3Data { public float x; public float y; public float z; }
@@ -19,6 +20,7 @@ public class BackendClient : MonoBehaviour
         public string room_plan_path;
         public string agents_path;
         public string session_id; // optional
+        public string memory_mode;
     }
 
     [Serializable]
@@ -37,6 +39,7 @@ public class BackendClient : MonoBehaviour
     public class SetupResponse
     {
         public string session_id;
+        public string memory_mode;
         public AgentPlacement[] agents;
     }
 
@@ -62,6 +65,7 @@ public class BackendClient : MonoBehaviour
         public string from;
         public string to;
         public string reason;
+        public string brief;
     }
 
     [Serializable]
@@ -69,6 +73,7 @@ public class BackendClient : MonoBehaviour
     {
         public string session_id;
         public string active_agent_id;
+        public string memory_mode;
         public Handoff handoff;
         public ChatEvent[] events;
     }
@@ -87,7 +92,7 @@ public class BackendClient : MonoBehaviour
     public IEnumerator SetupFromPaths(string roomPlanPath, string agentsPath, Action<SetupResponse> onOk, Action<string> onErr)
     {
         var url = $"{backendBaseUrl}/setup";
-        var payload = new SetupRequestPaths { room_plan_path = roomPlanPath, agents_path = agentsPath };
+        var payload = new SetupRequestPaths { room_plan_path = roomPlanPath, agents_path = agentsPath, memory_mode = memoryMode };
         var json = JsonUtility.ToJson(payload);
 
         using (var req = new UnityWebRequest(url, "POST"))

@@ -79,13 +79,17 @@ Beispiel (wie im PyCharm HTTP Client `examples/demo_requests.http`):
 ```json
 {
   "room_plan_path": "examples/room_plan.json",
-  "agents_path": "examples/agents.json"
+  "agents_path": "examples/agents.json",
+  "memory_mode": "shared_history"
 }
 ```
 
 Antwort:
 - `session_id`
+- `memory_mode`
 - Liste der Agenten mit Position/Forward
+
+`memory_mode` ist optional. `shared_history` ist das bisherige gemeinsame Chatgedaechtnis. `agent_private_history` aktiviert getrennte Agenten-Histories mit kurzer Handoff-Zusammenfassung.
 
 ### POST `/chat`
 ```json
@@ -293,6 +297,7 @@ Die folgenden Schritte zeigen, wie du die **neuen Skripte** in ein bestehendes U
 - `model`: Standard ist `gpt-4.1` (kannst du ändern)
 - `temperature`: Standard 0.3
 - `server_port`: Standard 8787
+- `memory_mode`: Standard `shared_history`; alternativ `agent_private_history`
 - `stt_model`: Standard `whisper-1` für Speech-to-Text (`/stt`)
 - `stt_language`: Standard `de`; leer lassen für Auto-Erkennung
 - `stt_max_audio_bytes`: Upload-Limit für Mikrofon-Audio (Default 25 MB)

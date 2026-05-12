@@ -35,9 +35,15 @@ def npc_action_schema(allowed_handoff_ids: List[str]) -> Dict:
                     {"type": "null"},
                 ]
             },
+            "handoff_brief": {
+                "oneOf": [
+                    {"type": "string"},
+                    {"type": "null"},
+                ]
+            },
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         },
-        "required": ["say", "handoff_to", "handoff_reason", "confidence"],
+        "required": ["say", "handoff_to", "handoff_reason", "handoff_brief", "confidence"],
         "additionalProperties": False,
     }
 

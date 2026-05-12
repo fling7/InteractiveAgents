@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 from .kb import KnowledgeBase
 from .openai_client import OpenAIResponsesClient
 from .projects import ProjectManager
-from .state import SessionStore
+from .state import SessionStore, normalize_memory_mode
 from .server import start_http_server
 
 
@@ -23,6 +23,7 @@ class AppConfig:
     server_host: str
     server_port: int
     max_history_turns: int
+    memory_mode: str
     max_handoffs: int
     kb_root: str
     kb_chunk_chars: int
@@ -127,6 +128,7 @@ def load_config() -> AppConfig:
         server_host=str(_get("server_host", "127.0.0.1")).strip(),
         server_port=int(_get("server_port", 8787)),
         max_history_turns=int(_get("max_history_turns", 20)),
+        memory_mode=normalize_memory_mode(_get("memory_mode", "shared_history")),
         max_handoffs=int(_get("max_handoffs", 1)),
         kb_root=str(_get("kb_root", "kb")),
         kb_chunk_chars=int(_get("kb_chunk_chars", 900)),
@@ -200,6 +202,7 @@ def run() -> None:
         project_manager=project_manager,
         default_room_plan_path=default_room_plan_path,
         default_agents_path=default_agents_path,
+        default_memory_mode=cfg.memory_mode,
     )
 
     print("[Backend] KnowledgeBase geladen:", kb.summary())

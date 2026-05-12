@@ -36,6 +36,8 @@ public class QuickAgentManager : MonoBehaviour
     public string backendBaseUrl = "http://127.0.0.1:8787";
     public string roomPlanPath = "examples/room_plan.example.json";
     public string agentsPath = "examples/agents.example.json";
+    [Tooltip("shared_history = gemeinsames Chatgedaechtnis; agent_private_history = privates Agentengedaechtnis mit Handoff-Brief.")]
+    public string memoryMode = "shared_history";
 
     [Header("Spawn")]
     public Vector3 spawnArea = new Vector3(12f, 0f, 12f);
@@ -113,6 +115,7 @@ public class QuickAgentManager : MonoBehaviour
         public string agents_path;
         public string session_id;
         public string project_id;
+        public string memory_mode;
     }
 
     [Serializable]
@@ -148,6 +151,7 @@ public class QuickAgentManager : MonoBehaviour
     public class SetupResponse
     {
         public string session_id;
+        public string memory_mode;
         public AgentPlacement[] agents;
     }
 
@@ -173,6 +177,7 @@ public class QuickAgentManager : MonoBehaviour
         public string from;
         public string to;
         public string reason;
+        public string brief;
     }
 
     [Serializable]
@@ -180,6 +185,7 @@ public class QuickAgentManager : MonoBehaviour
     {
         public string session_id;
         public string active_agent_id;
+        public string memory_mode;
         public Handoff handoff;
         public ChatEvent[] events;
     }
@@ -235,6 +241,7 @@ public class QuickAgentManager : MonoBehaviour
     private readonly HashSet<string> ttsInFlight = new HashSet<string>();
     private readonly Dictionary<string, float> ttsLastRequest = new Dictionary<string, float>();
     private readonly List<string> chatLog = new List<string>();
+    private readonly Dictionary<string, List<string>> agentChatLogs = new Dictionary<string, List<string>>();
     private AudioClip voiceRecordingClip;
     private string voiceRecordingDevice;
     private bool isVoiceRecording;
@@ -435,7 +442,8 @@ public class QuickAgentManager : MonoBehaviour
         {
             room_plan_path = useProjectSelection ? null : roomPlanPath,
             agents_path = useProjectSelection ? null : agentsPath,
-            project_id = useProjectSelection ? selectedProjectId : null
+            project_id = useProjectSelection ? selectedProjectId : null,
+            memory_mode = memoryMode
         };
         var json = JsonUtility.ToJson(payload);
 
@@ -456,8 +464,10 @@ public class QuickAgentManager : MonoBehaviour
 
             var resp = JsonUtility.FromJson<SetupResponse>(req.downloadHandler.text);
             sessionId = resp.session_id;
+            if (!string.IsNullOrEmpty(resp.memory_mode))
+                memoryMode = resp.memory_mode;
             lastAgents = resp.agents ?? Array.Empty<AgentPlacement>();
-            statusMessage = $"Setup OK. Agents: {lastAgents.Length}";
+            statusMessage = $"Setup OK. Memory: {memoryMode} | Agents: {lastAgents.Length}";
             UpdateAgentVoices(lastAgents);
             SpawnAgents(lastAgents);
             if (lastAgents.Length > 0)
@@ -467,7 +477,7 @@ public class QuickAgentManager : MonoBehaviour
 
             if (useProjectSelection)
             {
-                statusMessage = $"Setup OK. Projekt: {selectedProjectId} | Agents: {lastAgents.Length}";
+                statusMessage = $"Setup OK. Projekt: {selectedProjectId} | Memory: {memoryMode} | Agents: {lastAgents.Length}";
             }
         }
     }
@@ -560,8 +570,8 @@ public class QuickAgentManager : MonoBehaviour
         if (idleClips.Length == 0)
             Debug.LogWarning($"[QuickAgentManager] Keine AnimationClips in Resources/{animationResourceFolder} gefunden.");
 
-        var characterPrefabs = Resources.LoadAll<GameObject>("Characters");
-        var useCharacters = characterPrefabs != null && characterPrefabs.Length > 0;
+        var characterPrefabs = LoadCharacterPrefabs();
+        var useCharacters = characterPrefabs.Length > 0;
         if (!useCharacters)
         {
             Debug.LogWarning("[QuickAgentManager] Keine Prefabs in Resources/Characters – nutze Würfel als Fallback.");
@@ -669,6 +679,107 @@ public class QuickAgentManager : MonoBehaviour
                 result.Add(clip);
         }
         return result.ToArray();
+    }
+
+    private GameObject[] LoadCharacterPrefabs()
+    {
+        var assets = Resources.LoadAll<GameObject>("Characters");
+        if (assets == null || assets.Length == 0)
+        {
+            return Array.Empty<GameObject>();
+        }
+
+        var result = new List<GameObject>();
+        var skipped = 0;
+
+        foreach (var asset in assets)
+        {
+            if (asset == null)
+            {
+                skipped++;
+                continue;
+            }
+
+            // Animation FBX assets include '@' (for example 'Ch23_nonPBR@Idle')
+            // and should not be spawned as character prefabs.
+            if (asset.name.Contains("@"))
+            {
+                skipped++;
+                continue;
+            }
+
+            if (!HasRenderableCharacterMesh(asset))
+            {
+                skipped++;
+                continue;
+            }
+
+            result.Add(asset);
+        }
+
+        if (result.Count == 0)
+        {
+            Debug.LogWarning("[QuickAgentManager] Gefilterte Character-Liste ist leer - fallback auf ungefilterte Resources/Characters Assets.");
+            return assets;
+        }
+
+        Debug.Log($"[QuickAgentManager] Character-Prefabs geladen: {result.Count} (gefiltert: {skipped}).");
+        return result.ToArray();
+    }
+
+    private static bool HasRenderableCharacterMesh(GameObject candidate)
+    {
+        if (candidate == null)
+        {
+            return false;
+        }
+
+        var renderers = candidate.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        if (renderers == null || renderers.Length == 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < renderers.Length; i++)
+        {
+            var renderer = renderers[i];
+            if (renderer == null)
+            {
+                continue;
+            }
+
+            var materials = renderer.sharedMaterials;
+            if (materials == null || materials.Length == 0)
+            {
+                continue;
+            }
+
+            for (var m = 0; m < materials.Length; m++)
+            {
+                var material = materials[m];
+                if (material == null)
+                {
+                    continue;
+                }
+
+                if (material.mainTexture != null)
+                {
+                    return true;
+                }
+
+                if (material.HasProperty("_BaseMap") && material.GetTexture("_BaseMap") != null)
+                {
+                    return true;
+                }
+
+                if (material.HasProperty("_MainTex") && material.GetTexture("_MainTex") != null)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void OnDestroy()
@@ -804,6 +915,8 @@ public class QuickAgentManager : MonoBehaviour
 
             var resp = JsonUtility.FromJson<ChatResponse>(req.downloadHandler.text);
             sessionId = resp.session_id;
+            if (!string.IsNullOrEmpty(resp.memory_mode))
+                memoryMode = resp.memory_mode;
 
             var isHandoff = resp.handoff != null && !string.IsNullOrEmpty(resp.handoff.to);
             if (isHandoff && _fpvActive && fpvProximityHandoff)
@@ -840,8 +953,63 @@ public class QuickAgentManager : MonoBehaviour
             }
 
             var text = NormalizeChatText(ev.text);
-            chatLog.Add($"[{agentLabel}] {text}");
+            AddChatLine($"[{agentLabel}] {text}", ev.agent_id);
         }
+    }
+
+    private bool IsPrivateMemoryMode()
+    {
+        return string.Equals(memoryMode, "agent_private_history", StringComparison.Ordinal);
+    }
+
+    private void AddChatLine(string line, string agentId = null)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return;
+
+        chatLog.Add(line);
+        if (string.IsNullOrWhiteSpace(agentId))
+            return;
+
+        if (!agentChatLogs.TryGetValue(agentId, out var agentLog))
+        {
+            agentLog = new List<string>();
+            agentChatLogs[agentId] = agentLog;
+        }
+        agentLog.Add(line);
+    }
+
+    private void AddUserChatLine(string text, bool voice = false)
+    {
+        var clean = NormalizeChatText(text);
+        if (string.IsNullOrWhiteSpace(clean))
+            return;
+
+        AddChatLine(voice ? $"[Du/Voice] {clean}" : $"[Du] {clean}", activeAgentId);
+    }
+
+    private void ClearChatLogs()
+    {
+        chatLog.Clear();
+        agentChatLogs.Clear();
+    }
+
+    private List<string> GetRecentFpvChatLines(int maxLines)
+    {
+        var source = chatLog;
+        if (IsPrivateMemoryMode())
+        {
+            var agentId = !string.IsNullOrEmpty(_fpvNearestAgentId) ? _fpvNearestAgentId : activeAgentId;
+            if (string.IsNullOrEmpty(agentId) || !agentChatLogs.TryGetValue(agentId, out source))
+            {
+                return new List<string>();
+            }
+        }
+
+        var recent = new List<string>();
+        for (var i = source.Count - 1; i >= 0 && recent.Count < maxLines; i--)
+            recent.Insert(0, source[i]);
+        return recent;
     }
 
     private string NormalizeChatText(string text)
@@ -1004,6 +1172,12 @@ public class QuickAgentManager : MonoBehaviour
         GUILayout.Label($"Aktiv: {activeAgentId}");
 
         GUILayout.Space(6);
+        GUILayout.Label("Gedaechtnis:");
+        var memoryIndex = memoryMode == "agent_private_history" ? 1 : 0;
+        memoryIndex = GUILayout.Toolbar(memoryIndex, new[] { "Gemeinsam", "Privat" });
+        memoryMode = memoryIndex == 0 ? "shared_history" : "agent_private_history";
+
+        GUILayout.Space(6);
         GUILayout.Label("Projekt auswählen:");
         var sourceIndex = useProjectSelection ? 0 : 1;
         sourceIndex = GUILayout.Toolbar(sourceIndex, new[] { "Projekt", "Pfade" });
@@ -1125,7 +1299,7 @@ public class QuickAgentManager : MonoBehaviour
         }
         if (GUILayout.Button("Chat leeren"))
         {
-            chatLog.Clear();
+            ClearChatLogs();
         }
 
         chatScroll = GUILayout.BeginScrollView(chatScroll, GUILayout.Height(160));
@@ -1959,7 +2133,7 @@ public class QuickAgentManager : MonoBehaviour
         statusMessage = "Transkription OK.";
         if (sendVoiceTranscriptAutomatically)
         {
-            chatLog.Add($"[Du/Voice] {transcript}");
+            AddUserChatLine(transcript, voice: true);
             StartCoroutine(SendChat(transcript));
         }
         else
@@ -2099,7 +2273,7 @@ public class QuickAgentManager : MonoBehaviour
         }
 
         var toSend = chatInput.Trim();
-        chatLog.Add($"[Du] {toSend}");
+        AddUserChatLine(toSend);
         chatInput = "";
         StartCoroutine(SendChat(toSend));
     }
@@ -2720,12 +2894,10 @@ public class QuickAgentManager : MonoBehaviour
             if (GUI.Button(new Rect(panelX + panelW - 86f, panelY + 24f, 86f, 32f), "Senden"))
                 SendFpvChat();
 
-            // Last two chat lines for context
+            // Last two chat lines for context. In private-memory mode this is scoped to the current FPV agent.
             var logStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
             logStyle.normal.textColor = new Color(0.9f, 0.9f, 0.9f);
-            var recent = new List<string>();
-            for (var i = chatLog.Count - 1; i >= 0 && recent.Count < 2; i--)
-                recent.Insert(0, chatLog[i]);
+            var recent = GetRecentFpvChatLines(2);
             GUI.Label(new Rect(panelX, panelY + 62f, panelW, 40f),
                 string.Join("\n", recent), logStyle);
         }
@@ -2787,7 +2959,7 @@ public class QuickAgentManager : MonoBehaviour
     {
         var text = _fpvChatInput.Trim();
         if (string.IsNullOrEmpty(text)) return;
-        chatLog.Add($"[Du] {text}");
+        AddUserChatLine(text);
         _fpvChatInput = "";
         StartCoroutine(SendChat(text));
     }

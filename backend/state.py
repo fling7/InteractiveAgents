@@ -26,6 +26,32 @@ def _slugify(s: str) -> str:
     return s or "agent"
 
 
+MEMORY_MODE_SHARED = "shared_history"
+MEMORY_MODE_AGENT_PRIVATE = "agent_private_history"
+VALID_MEMORY_MODES = {MEMORY_MODE_SHARED, MEMORY_MODE_AGENT_PRIVATE}
+_MEMORY_MODE_ALIASES = {
+    "shared": MEMORY_MODE_SHARED,
+    "global": MEMORY_MODE_SHARED,
+    "global_history": MEMORY_MODE_SHARED,
+    "agent_private": MEMORY_MODE_AGENT_PRIVATE,
+    "private": MEMORY_MODE_AGENT_PRIVATE,
+    "private_history": MEMORY_MODE_AGENT_PRIVATE,
+    "per_agent": MEMORY_MODE_AGENT_PRIVATE,
+    "per_agent_history": MEMORY_MODE_AGENT_PRIVATE,
+}
+
+
+def normalize_memory_mode(value: Any, default: str = MEMORY_MODE_SHARED) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        raw = default
+    raw = _MEMORY_MODE_ALIASES.get(raw, raw)
+    if raw not in VALID_MEMORY_MODES:
+        valid = ", ".join(sorted(VALID_MEMORY_MODES))
+        raise ValueError(f"Unbekannter memory_mode: {raw}. Erlaubt: {valid}.")
+    return raw
+
+
 @dataclass
 class AgentSpec:
     id: str
@@ -87,7 +113,9 @@ class SessionState:
     agents: Dict[str, AgentSpec]
     placements: Dict[str, Dict[str, Any]]
     kb: KnowledgeBase
-    history: List[Dict[str, str]] = field(default_factory=list)  # role=user|assistant, content=str
+    memory_mode: str = MEMORY_MODE_SHARED
+    history: List[Dict[str, str]] = field(default_factory=list)  # shared mode: role=user|assistant, content=str
+    agent_histories: Dict[str, List[Dict[str, str]]] = field(default_factory=dict)
     created_ms: int = field(default_factory=_now_ms)
     updated_ms: int = field(default_factory=_now_ms)
     project_id: Optional[str] = None
@@ -129,6 +157,7 @@ class SessionStore:
     project_manager: ProjectManager
     default_room_plan_path: str = "examples/room_plan.example.json"
     default_agents_path: str = "examples/agents.example.json"
+    default_memory_mode: str = MEMORY_MODE_SHARED
     sessions: Dict[str, SessionState] = field(default_factory=dict)
     kb_cache: Dict[str, KnowledgeBase] = field(default_factory=dict)
     arrow_sessions: Dict[str, ArrowProjectDraft] = field(default_factory=dict)
@@ -150,9 +179,11 @@ class SessionStore:
         session_id: Optional[str] = None,
         kb: Optional[KnowledgeBase] = None,
         project_id: Optional[str] = None,
+        memory_mode: Optional[str] = None,
     ) -> SessionState:
         if not session_id:
             session_id = str(uuid.uuid4())
+        mode = normalize_memory_mode(memory_mode, default=normalize_memory_mode(self.default_memory_mode))
 
         agents_list: List[AgentSpec] = [AgentSpec.from_dict(d, i) for i, d in enumerate(agent_dicts)]
         agents_map = {a.id: a for a in agents_list}
@@ -181,7 +212,9 @@ class SessionStore:
             agents=agents_map,
             placements=placements,
             kb=kb or self.kb,
+            memory_mode=mode,
             history=[],
+            agent_histories={a.id: [] for a in agents_list},
             project_id=project_id,
         )
         self.sessions[session_id] = st
@@ -202,6 +235,7 @@ class SessionStore:
             project_room_plan = self.project_manager.load_room_plan(project_id)
             project_agents = self.project_manager.load_agents(project_id).get("agents", [])
             project_kb = self._get_project_kb(project_id)
+        memory_mode = normalize_memory_mode(payload.get("memory_mode"), default=self.default_memory_mode)
 
         room_plan_path = payload.get("room_plan_path")
         if room_plan_path:
@@ -232,6 +266,7 @@ class SessionStore:
             session_id=session_id,
             kb=project_kb,
             project_id=project_id,
+            memory_mode=memory_mode,
         )
 
         agents_out = []
@@ -252,7 +287,7 @@ class SessionStore:
                 }
             )
 
-        return {"session_id": st.session_id, "agents": agents_out}
+        return {"session_id": st.session_id, "memory_mode": st.memory_mode, "agents": agents_out}
 
     def tts(self, payload: Dict[str, Any]) -> Tuple[bytes, str]:
         text = str(payload.get("text") or "").strip()
@@ -347,6 +382,34 @@ class SessionStore:
         cutoff_user_idx = user_indices[-max_user_msgs]
         return history[cutoff_user_idx:]
 
+    def _agent_history(self, st: SessionState, agent_id: str) -> List[Dict[str, str]]:
+        return st.agent_histories.setdefault(agent_id, [])
+
+    def _commit_agent_history(self, st: SessionState, agent_id: str, history: List[Dict[str, str]]) -> None:
+        st.agent_histories[agent_id] = self._trim_history(history)
+
+    def _handoff_brief(self, res: Dict[str, Any], user_text: str) -> str:
+        brief = str(res.get("handoff_brief") or "").strip()
+        if brief:
+            return brief
+        reason = str(res.get("handoff_reason") or "").strip()
+        if reason:
+            return f"Nutzerfrage: {user_text}\nWeiterleitungsgrund: {reason}"
+        return f"Nutzerfrage: {user_text}"
+
+    def _handoff_user_context(
+        self,
+        from_agent: AgentSpec,
+        user_text: str,
+        handoff_brief: str,
+        handoff_reason: Optional[str],
+    ) -> str:
+        lines = [f"Uebergabekontext von {from_agent.display_name}: {handoff_brief}"]
+        if handoff_reason:
+            lines.append(f"Weiterleitungsgrund: {handoff_reason}")
+        lines.append(f"Aktuelle Nutzerfrage: {user_text}")
+        return "\n".join(lines)
+
     def _build_developer_prompt(self, agent: AgentSpec, others: List[AgentSpec], kb_snippets: List[Dict[str, Any]], allow_handoff: bool) -> str:
         lines: List[str] = []
         lines.append(f"Du bist ein virtueller Gesprächspartner (NPC) in Unity.")
@@ -363,6 +426,8 @@ class SessionStore:
         lines.append("")
         if allow_handoff and others:
             lines.append("Handoff-Regel:")
+            lines.append("- Wenn du weiterleitest, setze 'handoff_brief' auf 1-2 kurze Saetze fuer den Zielagenten: Thema, wichtige Nutzerangaben und offene Frage.")
+            lines.append("- Wenn du nicht weiterleitest, setze 'handoff_to', 'handoff_reason' und 'handoff_brief' auf null.")
             lines.append("- Wenn die Nutzerfrage deutlich außerhalb deiner Expertise liegt oder du unsicher bist (confidence < 0.55), leite an den am besten passenden anderen Agenten weiter.")
             lines.append("- Setze dann 'handoff_to' auf dessen id, und 'say' ist nur eine kurze Weiterleitungsformulierung (ohne ausführliche Antwort).")
             lines.append("")
@@ -381,7 +446,16 @@ class SessionStore:
         lines.append("WICHTIG: Du MUSST deine Antwort als JSON ausgeben und genau das Schema erfüllen (Structured Output).")
         return "\n".join(lines).strip()
 
-    def _call_agent(self, st: SessionState, agent: AgentSpec, history_with_user: List[Dict[str, str]], allow_handoff: bool, forwarded_from: Optional[AgentSpec] = None, forwarded_reason: Optional[str] = None) -> Dict[str, Any]:
+    def _call_agent(
+        self,
+        st: SessionState,
+        agent: AgentSpec,
+        history_with_user: List[Dict[str, str]],
+        allow_handoff: bool,
+        forwarded_from: Optional[AgentSpec] = None,
+        forwarded_reason: Optional[str] = None,
+        forwarded_brief: Optional[str] = None,
+    ) -> Dict[str, Any]:
         # Determine allowed handoff ids (excluding self)
         allowed = [a.id for a in st.agents.values() if a.id != agent.id] if allow_handoff else []
         schema = npc_action_schema(allowed_handoff_ids=allowed)
@@ -399,12 +473,16 @@ class SessionStore:
         input_msgs: List[Dict[str, Any]] = [{"role": "developer", "content": dev_prompt}]
 
         if forwarded_from is not None:
+            context = f"Du wurdest gerade von {forwarded_from.display_name} (id: {forwarded_from.id}) an den Nutzer weitergeleitet."
+            if forwarded_reason:
+                context += f" Grund: {forwarded_reason}"
+            if forwarded_brief:
+                context += f" Uebergabekontext: {forwarded_brief}"
+            context += " Antworte direkt auf die Nutzerfrage."
             input_msgs.append(
                 {
                     "role": "developer",
-                    "content": f"Du wurdest gerade von {forwarded_from.display_name} (id: {forwarded_from.id}) an den Nutzer weitergeleitet."
-                               + (f" Grund: {forwarded_reason}" if forwarded_reason else "")
-                               + " Antworte direkt auf die Nutzerfrage.",
+                    "content": context,
                 }
             )
 
@@ -437,6 +515,7 @@ class SessionStore:
             "say": str(parsed.get("say", "")).strip(),
             "handoff_to": parsed.get("handoff_to", None),
             "handoff_reason": parsed.get("handoff_reason", None),
+            "handoff_brief": parsed.get("handoff_brief", None),
             "confidence": parsed.get("confidence", 0.5),
             "_raw_text": out_text,
             "_response_id": resp.get("id"),
@@ -445,6 +524,11 @@ class SessionStore:
         if not result["say"]:
             # fallback: use raw text
             result["say"] = out_text.strip() or "…"
+
+        if result["handoff_reason"] is not None:
+            result["handoff_reason"] = str(result["handoff_reason"]).strip() or None
+        if result["handoff_brief"] is not None:
+            result["handoff_brief"] = str(result["handoff_brief"]).strip() or None
 
         return result
 
@@ -465,48 +549,66 @@ class SessionStore:
         if not user_text:
             raise ValueError("user_text ist leer.")
 
+        agent_a = st.agents[active_agent_id]
+        if st.memory_mode == MEMORY_MODE_AGENT_PRIVATE:
+            return self._chat_agent_private(st, session_id, agent_a, user_text)
+        return self._chat_shared(st, session_id, agent_a, user_text)
+
+    def _openai_error_chat_response(self, session_id: str, active_agent_id: str, error: OpenAIHTTPError) -> Dict[str, Any]:
+        return {
+            "session_id": session_id,
+            "active_agent_id": active_agent_id,
+            "memory_mode": MEMORY_MODE_SHARED,
+            "events": [
+                {"type": "say", "agent_id": active_agent_id, "text": f"[Backend] OpenAI Fehler: {error}"},
+            ],
+            "error": {"status": error.status, "details": error.details},
+        }
+
+    def _chat_shared(self, st: SessionState, session_id: str, agent_a: AgentSpec, user_text: str) -> Dict[str, Any]:
         history_with_user = st.history + [{"role": "user", "content": user_text}]
 
-        agent_a = st.agents[active_agent_id]
-        # Call current agent for either answer or handoff decision
         try:
             res_a = self._call_agent(st, agent_a, history_with_user, allow_handoff=True)
         except OpenAIHTTPError as e:
-            return {
-                "session_id": session_id,
-                "active_agent_id": active_agent_id,
-                "events": [
-                    {"type": "say", "agent_id": active_agent_id, "text": f"[Backend] OpenAI Fehler: {e}"},
-                ],
-                "error": {"status": e.status, "details": e.details},
-            }
+            out = self._openai_error_chat_response(session_id, agent_a.id, e)
+            out["memory_mode"] = st.memory_mode
+            return out
 
         events = [{"type": "say", "agent_id": agent_a.id, "text": res_a["say"]}]
-        new_active = active_agent_id
+        new_active = agent_a.id
         handoff = None
 
         handoff_to = res_a.get("handoff_to", None)
         if handoff_to in st.agents and handoff_to != agent_a.id:
-            # perform at most max_handoffs
             if self.max_handoffs > 0:
                 agent_b = st.agents[handoff_to]
                 try:
-                    res_b = self._call_agent(st, agent_b, history_with_user, allow_handoff=False, forwarded_from=agent_a, forwarded_reason=str(res_a.get("handoff_reason") or ""))
+                    res_b = self._call_agent(
+                        st,
+                        agent_b,
+                        history_with_user,
+                        allow_handoff=False,
+                        forwarded_from=agent_a,
+                        forwarded_reason=str(res_a.get("handoff_reason") or ""),
+                    )
                 except OpenAIHTTPError as e:
                     res_b = {"say": f"[Backend] OpenAI Fehler beim Handoff: {e}"}
                 events.append({"type": "say", "agent_id": agent_b.id, "text": res_b["say"]})
                 new_active = agent_b.id
-                handoff = {"from": agent_a.id, "to": agent_b.id, "reason": res_a.get("handoff_reason")}
-                # Commit history: user msg + a say + b say
+                handoff = {
+                    "from": agent_a.id,
+                    "to": agent_b.id,
+                    "reason": res_a.get("handoff_reason"),
+                    "brief": res_a.get("handoff_brief"),
+                }
                 st.history = history_with_user + [
                     {"role": "assistant", "content": res_a["say"]},
                     {"role": "assistant", "content": res_b["say"]},
                 ]
             else:
-                # no handoffs allowed: just answer from A
                 st.history = history_with_user + [{"role": "assistant", "content": res_a["say"]}]
         else:
-            # no handoff
             st.history = history_with_user + [{"role": "assistant", "content": res_a["say"]}]
 
         st.history = self._trim_history(st.history)
@@ -515,6 +617,78 @@ class SessionStore:
         return {
             "session_id": session_id,
             "active_agent_id": new_active,
+            "memory_mode": st.memory_mode,
+            "handoff": handoff,
+            "events": events,
+        }
+
+    def _chat_agent_private(self, st: SessionState, session_id: str, agent_a: AgentSpec, user_text: str) -> Dict[str, Any]:
+        history_a_with_user = list(self._agent_history(st, agent_a.id)) + [{"role": "user", "content": user_text}]
+
+        try:
+            res_a = self._call_agent(st, agent_a, history_a_with_user, allow_handoff=True)
+        except OpenAIHTTPError as e:
+            out = self._openai_error_chat_response(session_id, agent_a.id, e)
+            out["memory_mode"] = st.memory_mode
+            return out
+
+        events = [{"type": "say", "agent_id": agent_a.id, "text": res_a["say"]}]
+        new_active = agent_a.id
+        handoff = None
+
+        handoff_to = res_a.get("handoff_to", None)
+        if handoff_to in st.agents and handoff_to != agent_a.id and self.max_handoffs > 0:
+            agent_b = st.agents[handoff_to]
+            handoff_brief = self._handoff_brief(res_a, user_text)
+            handoff_reason = res_a.get("handoff_reason")
+            target_user_context = self._handoff_user_context(agent_a, user_text, handoff_brief, handoff_reason)
+            history_b_with_user = list(self._agent_history(st, agent_b.id)) + [
+                {"role": "user", "content": target_user_context}
+            ]
+            try:
+                res_b = self._call_agent(
+                    st,
+                    agent_b,
+                    history_b_with_user,
+                    allow_handoff=False,
+                    forwarded_from=agent_a,
+                    forwarded_reason=str(handoff_reason or ""),
+                    forwarded_brief=handoff_brief,
+                )
+            except OpenAIHTTPError as e:
+                res_b = {"say": f"[Backend] OpenAI Fehler beim Handoff: {e}"}
+
+            events.append({"type": "say", "agent_id": agent_b.id, "text": res_b["say"]})
+            new_active = agent_b.id
+            handoff = {
+                "from": agent_a.id,
+                "to": agent_b.id,
+                "reason": handoff_reason,
+                "brief": handoff_brief,
+            }
+            self._commit_agent_history(
+                st,
+                agent_a.id,
+                history_a_with_user + [{"role": "assistant", "content": res_a["say"]}],
+            )
+            self._commit_agent_history(
+                st,
+                agent_b.id,
+                history_b_with_user + [{"role": "assistant", "content": res_b["say"]}],
+            )
+        else:
+            self._commit_agent_history(
+                st,
+                agent_a.id,
+                history_a_with_user + [{"role": "assistant", "content": res_a["say"]}],
+            )
+
+        st.touch()
+
+        return {
+            "session_id": session_id,
+            "active_agent_id": new_active,
+            "memory_mode": st.memory_mode,
             "handoff": handoff,
             "events": events,
         }

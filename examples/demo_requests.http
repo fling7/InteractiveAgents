@@ -7,7 +7,8 @@ Content-Type: application/json
 
 {
   "room_plan_path": "examples/room_plan.example.json",
-  "agents_path": "examples/agents.example.json"
+  "agents_path": "examples/agents.example.json",
+  "memory_mode": "shared_history"
 }
 
 ### Chat

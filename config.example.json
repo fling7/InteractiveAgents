@@ -5,6 +5,7 @@
   "server_host": "127.0.0.1",
   "server_port": 8787,
   "max_history_turns": 20,
+  "memory_mode": "shared_history",
   "max_handoffs": 1,
   "kb_root": "kb",
   "kb_chunk_chars": 900,
